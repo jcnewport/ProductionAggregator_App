@@ -1,0 +1,13 @@
+{
+  "name": "production-aggregator-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production data intake and export app for Stewardship.IS",
+  "workspaces": ["api", "web"],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=api",
+    "dev:web": "npm run dev --workspace=web",
+    "build:api": "npm run build --workspace=api",
+    "build:web": "npm run build --workspace=web"
+  }
+}
