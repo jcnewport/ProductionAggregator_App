@@ -17,3 +17,9 @@ ComboCurve_export_sample.xlsx
 
 # Root-level package-lock (we use per-package locks in /api and /web)
 /package-lock.json
+
+# Vite dev-server timestamps (auto-generated, never useful to commit)
+web/vite.config.ts.timestamp-*.mjs
+
+# Local test artifacts
+/test-export.xlsx

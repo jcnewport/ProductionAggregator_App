@@ -12,6 +12,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
 import exportsRouter from './routes/exports.js';
 
@@ -54,6 +56,30 @@ app.use('/api/export', exportsRouter);
 // TODO: Mount additional route handlers
 // app.use('/api/emails', emailRoutes);
 // app.use('/api/mappings', mappingRoutes);
+
+// ─── Serve the React frontend in production ──────────────────────────────
+// When this file is compiled, it sits at /api/dist/index.js. The web app's
+// built static files live at /web/dist (relative to the repo root). Traversing
+// two levels up from __dirname gives us the repo root, and then /web/dist.
+//
+//   /api/dist/index.js  →  __dirname = /api/dist
+//   ../../web/dist     →  /web/dist
+//
+// We also handle the dev case where there's no /web/dist yet (skip static
+// serving so the API can run standalone while we're developing the React app
+// via `npm run dev` in /web with its Vite dev server proxy).
+const WEB_DIST = path.resolve(__dirname, '..', '..', 'web', 'dist');
+if (fs.existsSync(WEB_DIST)) {
+  console.log(`[web] Serving React static files from ${WEB_DIST}`);
+  app.use(express.static(WEB_DIST));
+  // SPA fallback: anything that ISN'T /api/* and ISN'T a file we served above
+  // should return index.html so React Router can take over client-side.
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(path.join(WEB_DIST, 'index.html'));
+  });
+} else {
+  console.warn(`[web] No frontend build found at ${WEB_DIST} — running API only.`);
+}
 
 app.listen(PORT, () => {
   console.log(`ProductionAggregator API running on port ${PORT}`);

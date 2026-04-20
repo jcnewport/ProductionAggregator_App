@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build:web": "cd ../web && npm install --no-audit --no-fund && npm run build",
+    "build:api": "tsc",
+    "build": "npm run build:web && npm run build:api",
     "start": "node dist/index.js"
   },
   "dependencies": {
