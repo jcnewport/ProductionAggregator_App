@@ -1,21 +1,15 @@
 /**
- * Stewardship.IS brand palette — Slipstream edition.
+ * Stewardship.IS brand palette.
  *
  * Color system:
  *   - Navy family is for dark surfaces (header, footer) and primary text on light backgrounds.
  *   - "primary" (blue) is the action color — used for CTAs like "Sign in" and "Generate & Download."
- *   - "brandGreen" is Slipstream Accent 3 — replaces the old teal as the brand accent
- *     (wordmark highlight, active nav indicator, help-callout border). Action (blue) and
- *     brand accent (green) stay separate so the UI has a two-layer hierarchy: green says
- *     "this is ours," blue says "click here to do something."
- *   - "logoAccent" is black — the solid block on the logo mark on light surfaces. On the navy
- *     header we pass white explicitly (see Layout.tsx) so the mark stays legible on dark.
- *   - Slipstream Accent 1 (purple) and Accent 5 (orange) drive the Dashboard page treatment:
- *       · purple for the "Dashboard" page title
- *       · orange for the text inside the light-green stat/activity cards
+ *   - "electricTeal" is the brand accent — logo highlight, active nav indicator, help-callout border.
+ *     Keeping a clear separation between action (blue) and brand accent (teal) gives the UI a nice
+ *     two-layer hierarchy: teal says "this is ours," blue says "click here to do something."
  *   - Gray scale is tuned to read well on both the navy header and the off-white page background.
- *   - Status colors are distinct hues (dark green/orange/red/blue) — separate from brandGreen,
- *     so a "completed" pill doesn't read the same as the brand wordmark.
+ *   - Status colors are distinct hues (green/orange/red/blue) — no longer reusing teal for success,
+ *     so a successful-green chip and a brand-teal logo don't get confused.
  *
  * Usage note: every component pulls from this file so palette changes are a one-file edit.
  */
@@ -28,16 +22,9 @@ export const colors = {
   primary: '#1F4FD8', // primary.500 — Sign in, Generate & Download, primary buttons
   primaryLight: '#E6ECFF', // primary.100 — soft bg tint for primary-accented callouts
 
-  // ── Brand accent (Slipstream Accent 3 — main green) ──
-  brandGreen: '#A7EA52', // wordmark highlight, active nav underline, help-callout border
-  brandGreenLight: '#E4F7C4', // light tint — dashboard card backgrounds
-
-  // ── Logo accent (black on light surfaces; Layout.tsx overrides to white on the navy header) ──
-  logoAccent: '#000000',
-
-  // ── Slipstream secondary accents (used on Dashboard page) ──
-  brandPurple: '#4E67C8', // Slipstream Accent 1 — "Dashboard" page title
-  brandOrange: '#FFA751', // Slipstream Accent 5 — card text on light-green cards
+  // ── Brand accent (teal) ──
+  electricTeal: '#2FA4A9', // secondary.teal.500 — logo accent, active nav underline, brand highlights
+  tealLight: '#E6F6F7', // secondary.teal.100
 
   // ── Neutrals ──
   white: '#FFFFFF', // gray.0
@@ -47,9 +34,9 @@ export const colors = {
   steelBlue: '#B6BFCB', // gray.300 — muted text on the navy header (inactive nav, user email, footer)
 
   // ── Status ──
-  success: '#2E7D32', // success.500 — dark green (kept distinct from brandGreen)
+  success: '#2E7D32', // success.500 — green
   successBg: '#E8F5E9', // success.100
-  warning: '#ED8B00', // warning.500 — orange (kept distinct from brandOrange)
+  warning: '#ED8B00', // warning.500 — orange
   warningBg: '#FFF4E5', // warning.100
   danger: '#C62828', // error.500 — red
   dangerBg: '#FDECEC', // error.100

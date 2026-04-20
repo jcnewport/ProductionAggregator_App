@@ -135,25 +135,21 @@ export default function DashboardPage() {
  * ────────────────────────────────────────────────────────────── */
 
 function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
-  // Dashboard page title is rendered in Slipstream Accent 1 (purple) per brand direction.
-  // The subtitle stays gray so the eye catches the title first.
   return (
     <div>
-      <h2 style={{ margin: 0, color: colors.brandPurple, fontSize: '22px', fontWeight: 700 }}>{title}</h2>
+      <h2 style={{ margin: 0, color: colors.midnightNavy, fontSize: '22px', fontWeight: 700 }}>{title}</h2>
       <p style={{ margin: '4px 0 0 0', color: colors.darkGray, fontSize: '14px' }}>{subtitle}</p>
     </div>
   );
 }
 
 function Card({ title, subtitle, children }: { title: string; subtitle?: string; children?: React.ReactNode }) {
-  // Cards on the dashboard use the Slipstream light-green background and
-  // Slipstream Accent-5 orange for their primary text (titles + subtitles).
   return (
     <div style={cardStyle}>
       <div style={{ marginBottom: children ? '16px' : 0 }}>
-        <h3 style={{ margin: 0, color: colors.brandOrange, fontSize: '16px', fontWeight: 600 }}>{title}</h3>
+        <h3 style={{ margin: 0, color: colors.midnightNavy, fontSize: '16px', fontWeight: 600 }}>{title}</h3>
         {subtitle && (
-          <p style={{ margin: '2px 0 0 0', color: colors.brandOrange, fontSize: '13px', opacity: 0.9 }}>{subtitle}</p>
+          <p style={{ margin: '2px 0 0 0', color: colors.darkGray, fontSize: '13px' }}>{subtitle}</p>
         )}
       </div>
       {children}
@@ -162,17 +158,16 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
 }
 
 function StatCard({ label, value, loading }: { label: string; value: string; loading: boolean }) {
-  // Stat cards: light-green card (from cardStyle) with orange label and value.
   return (
     <div style={cardStyle}>
-      <div style={{ fontSize: '12px', color: colors.brandOrange, textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
+      <div style={{ fontSize: '12px', color: colors.darkGray, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
         {label}
       </div>
       <div
         style={{
           fontSize: '26px',
           fontWeight: 700,
-          color: colors.brandOrange,
+          color: colors.midnightNavy,
           marginTop: '6px',
           minHeight: '30px',
         }}
@@ -185,7 +180,7 @@ function StatCard({ label, value, loading }: { label: string; value: string; loa
 
 function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: boolean }) {
   if (rows.length === 0) {
-    return <div style={{ color: colors.brandOrange, fontSize: '13px' }}>No entries yet.</div>;
+    return <div style={{ color: colors.darkGray, fontSize: '13px' }}>No entries yet.</div>;
   }
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -213,7 +208,7 @@ function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: 
                 <StatusPill status={r.status} />
               </td>
               {showErrors && (
-                <td style={{ ...tdStyle, color: colors.brandOrange, fontSize: '12px', maxWidth: '360px' }}>
+                <td style={{ ...tdStyle, color: colors.darkGray, fontSize: '12px', maxWidth: '360px' }}>
                   {(r.error_messages ?? []).slice(0, 2).map((m, i) => (
                     <div key={i}>{truncate(m, 200)}</div>
                   ))}
@@ -273,7 +268,7 @@ function ErrorBanner({ message }: { message: string }) {
 
 function SkeletonRow() {
   return (
-    <div style={{ color: colors.brandOrange, fontSize: '13px', fontStyle: 'italic' }}>Loading…</div>
+    <div style={{ color: colors.darkGray, fontSize: '13px', fontStyle: 'italic' }}>Loading…</div>
   );
 }
 
@@ -315,9 +310,7 @@ function truncate(s: string, n: number): string {
  * ────────────────────────────────────────────────────────────── */
 
 const cardStyle: React.CSSProperties = {
-  // Dashboard cards use the Slipstream light-green tint (~60% of Accent 3)
-  // with orange text per brand direction.
-  backgroundColor: colors.brandGreenLight,
+  backgroundColor: colors.white,
   borderRadius: '8px',
   padding: '20px',
   boxShadow: shadows.card,
@@ -331,20 +324,18 @@ const tableStyle: React.CSSProperties = {
 
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
-  color: colors.brandOrange,
-  fontWeight: 700,
+  color: colors.darkGray,
+  fontWeight: 600,
   fontSize: '11px',
   textTransform: 'uppercase',
   letterSpacing: '0.5px',
   padding: '8px 10px',
-  // Slightly deeper green separator so the header row still has structure
-  // on the light-green card background.
-  borderBottom: `1px solid ${colors.brandGreen}`,
+  borderBottom: `1px solid ${colors.mediumGray}`,
 };
 
 const tdStyle: React.CSSProperties = {
   padding: '10px',
-  borderBottom: `1px solid ${colors.brandGreen}33`, // 20% alpha — soft rule between rows
-  color: colors.brandOrange,
+  borderBottom: `1px solid ${colors.lightGray}`,
+  color: colors.midnightNavy,
   verticalAlign: 'top',
 };
