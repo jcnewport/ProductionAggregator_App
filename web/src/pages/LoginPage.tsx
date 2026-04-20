@@ -66,14 +66,15 @@ export default function LoginPage() {
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           {/*
             Centered logo mark above the wordmark. On the white card we use
-            the softer neutral-gray stripe color (#98A2B3 default) so the
-            teal accent is the eye-catcher without feeling too heavy.
+            the softer neutral-gray stripe (#98A2B3 default) + black accent
+            (LogoMark's default) — a clean, monochrome mark that lets the
+            green Stewardship.IS wordmark carry the brand color.
           */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
             <LogoMark size={56} />
           </div>
           <h1 style={{ margin: 0, color: colors.midnightNavy, fontSize: '22px', fontWeight: 700 }}>
-            <span style={{ color: colors.electricTeal }}>Stewardship.IS</span> Production Aggregator
+            <span style={{ color: colors.brandGreen }}>Stewardship.IS</span> Production Aggregator
           </h1>
           <p style={{ margin: '8px 0 0 0', color: colors.darkGray, fontSize: '13px' }}>
             Sign in to access production data.

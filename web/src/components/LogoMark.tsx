@@ -4,7 +4,9 @@
  *
  * The icon has two elements:
  *   - The "stripes" (multiple thin parallelograms) — usually rendered in a muted gray
- *   - The "accent" (one solid block) — usually rendered in the brand teal
+ *   - The "accent" (one solid block) — defaults to black on light surfaces. On dark
+ *     surfaces (e.g., the navy header in Layout.tsx) callers pass white so the mark
+ *     stays legible.
  *
  * Exposing both as props lets us use a brighter stripe on the dark navy header
  * and a softer gray stripe on the white login card without duplicating the SVG.
@@ -15,7 +17,7 @@ interface LogoMarkProps {
   size?: number;
   /** Color of the gray-stripe elements. Defaults to a neutral gray that reads on white. */
   stripe?: string;
-  /** Color of the solid accent block. Defaults to brand teal. */
+  /** Color of the solid accent block. Defaults to solid black (for use on light surfaces). */
   accent?: string;
   /** Extra inline styles (e.g., margin) the caller wants to apply. */
   style?: React.CSSProperties;
@@ -24,7 +26,7 @@ interface LogoMarkProps {
 export default function LogoMark({
   size = 32,
   stripe = '#98A2B3',
-  accent = '#2FA4A9',
+  accent = '#000000',
   style,
 }: LogoMarkProps) {
   return (

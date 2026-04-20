@@ -6,10 +6,13 @@
  *   - Main content area (via <Outlet />)
  *   - Small footer
  *
- * Stewardship.IS palette everywhere. Header is midnight navy with the
- * active nav link highlighted in electric teal, and a small inline SVG logo
- * mark to the left of the product wordmark. Non-active nav links sit in
- * a muted steel-blue gray so they read as "secondary" but stay readable on navy.
+ * Stewardship.IS (Slipstream) palette. Header is midnight navy with the
+ * active nav link highlighted in brand green (Slipstream Accent 3), and a small
+ * inline SVG logo mark to the left of the product wordmark. On the navy header
+ * we pass `accent={colors.white}` to LogoMark so the mark stays legible — the
+ * component's default accent is black (for use on light surfaces like the login
+ * card). Non-active nav links sit in a muted steel-blue gray so they read as
+ * "secondary" but stay readable on navy.
  */
 
 import { NavLink, Outlet } from 'react-router-dom';
@@ -60,12 +63,13 @@ export default function Layout() {
             }}
           >
             {/*
-              Logo mark stays tasteful at 28px — the stripe color is bumped
-              to a brighter gray (#B6BFCB) so it reads cleanly against the
-              midnight-navy header, while the teal accent stays on-brand.
+              Logo mark stays tasteful at 28px. The stripe color is bumped to a
+              brighter gray (#B6BFCB) so the lines read cleanly on midnight navy,
+              and the accent is white because a literal black block — the
+              component's default on light surfaces — would vanish into the navy.
             */}
-            <LogoMark size={28} stripe={colors.steelBlue} accent={colors.electricTeal} />
-            <span style={{ color: colors.electricTeal }}>Stewardship.IS</span>{' '}
+            <LogoMark size={28} stripe={colors.steelBlue} accent={colors.white} />
+            <span style={{ color: colors.brandGreen }}>Stewardship.IS</span>{' '}
             <span style={{ color: colors.white }}>Production Aggregator</span>
           </h1>
           <nav style={{ display: 'flex', gap: '20px' }}>
@@ -76,10 +80,10 @@ export default function Layout() {
                 end={l.end}
                 style={({ isActive }) => ({
                   textDecoration: 'none',
-                  color: isActive ? colors.electricTeal : colors.steelBlue,
+                  color: isActive ? colors.brandGreen : colors.steelBlue,
                   fontWeight: isActive ? 600 : 500,
                   fontSize: '14px',
-                  borderBottom: isActive ? `2px solid ${colors.electricTeal}` : '2px solid transparent',
+                  borderBottom: isActive ? `2px solid ${colors.brandGreen}` : '2px solid transparent',
                   paddingBottom: '3px',
                 })}
               >

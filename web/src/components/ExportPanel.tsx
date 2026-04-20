@@ -258,7 +258,9 @@ export default function ExportPanel({
       <div
         style={{
           backgroundColor: colors.lightGray,
-          borderLeft: `3px solid ${colors.electricTeal}`,
+          // Help callout uses the brand green as a left rule — same
+          // visual role the old teal used to play.
+          borderLeft: `3px solid ${colors.brandGreen}`,
           padding: '14px 16px',
           fontSize: '13px',
           color: colors.midnightNavy,
