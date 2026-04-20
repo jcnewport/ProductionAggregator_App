@@ -13,6 +13,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
+import exportsRouter from './routes/exports.js';
 
 // Load environment variables
 dotenv.config();
@@ -45,8 +46,12 @@ app.post('/api/poll', async (_req, res) => {
   }
 });
 
+// ComboCurve export endpoints:
+//   GET /api/export/monthly?start=YYYY-MM&end=YYYY-MM
+//   GET /api/export/daily?start=YYYY-MM-DD&end=YYYY-MM-DD
+app.use('/api/export', exportsRouter);
+
 // TODO: Mount additional route handlers
-// app.use('/api/exports', exportRoutes);
 // app.use('/api/emails', emailRoutes);
 // app.use('/api/mappings', mappingRoutes);
 

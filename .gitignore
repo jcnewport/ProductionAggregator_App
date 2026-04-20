@@ -10,3 +10,10 @@ sample-data/
 # Google OAuth credentials — NEVER commit these
 client_secret_*.json
 gmail-credentials.json
+
+# Client data files — stay out of the repo
+well_Frio_Energy_Holdings_I*.csv
+ComboCurve_export_sample.xlsx
+
+# Root-level package-lock (we use per-package locks in /api and /web)
+/package-lock.json
