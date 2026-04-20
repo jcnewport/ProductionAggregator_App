@@ -23,6 +23,7 @@ import { arloPartnerReportXlsxAdapter } from './arloPartnerReportXlsx.js';
 import { hierarchicalAllocatedXlsxAdapter } from './hierarchicalAllocatedXlsx.js';
 import { btaDailyPerWellXlsxAdapter } from './btaDailyPerWellXlsx.js';
 import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
+import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -77,32 +78,22 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     notes: 'Near 1:1 with template. 3-line-per-record PDF text structure.',
   },
 
-  // ─── Format 2 — PDS EOG Monthly (STUB) ───
+  // ─── Format 2 — PDS EOG Monthly (IMPLEMENTED) ───
   //
-  // EOG PDFs from Frio Energy share the top-of-document boilerplate with Anadarko
-  // PDFs. Distinguishing markers live in the column header row:
-  //   EOG uses "Water Inj" (no 't') and "DaysOn" (no space)
-  //   Anadarko uses "Water Inject" and "Days On" (handled in its own detect)
-  // We rely on those column-header spellings rather than an operator name,
-  // because the operator name "EOG RESOURCES" is not always present in the
-  // extracted text stream in a reliable spot.
+  // Positional (x/y) extraction via the same pagerender-override pattern used
+  // for the BTA WIO adapter. We had to switch away from flat text because
+  // pdf-parse's default text stream reorders EOG's 11 data columns in an
+  // unstable, non-visual sequence (date → vols → wellID → wellName mixed).
+  // Header row is located by scanning for ≥6 known labels and each data-row
+  // item is bucketed into the closest column center within ±40 pt. Distinguishing
+  // signatures from the Anadarko sibling: "Water Inj" (no 't') and "DaysOn"
+  // (no space).
   {
-    adapter: stubAdapter({
-      name: 'PDS EOG Monthly',
-      operatorName: 'EOG Resources',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@frioenergy\.com$/i, /@pdswdx\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Monthly Production Estimates', 'PDS Well Data Exchange') &&
-        /Water\s*Inj(?!ect)/i.test(ctx.pdfText) && // "Water Inj" but NOT "Water Inject"
-        /DaysOn/i.test(ctx.pdfText),               // no space between Days and On
-    }),
+    adapter: pdsEogMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-EOG-MONTHLY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Column order differs from Anadarko: Well Name before Well ID. Distinguishing signature: "Water Inj" (no t) and "DaysOn" (no space) in column headers.',
+      'Positional x/y extraction (pagerender override). 11 columns: Well Name | Well ID | API | Prod Date | DaysOn | Oil Prod | Oil Sales | Gas Prod | Gas Sales | Water Prod | Water Inj. Monthly end-of-month dates normalized to first-of-month; raw date preserved. Negative Oil Prod (BS&W corrections) preserved. Distinguishing signatures vs Anadarko: "Water Inj" (no t) and "DaysOn" (no space).',
   },
 
   // ─── Format 3 — PDS Mewbourne Monthly (STUB) ───
