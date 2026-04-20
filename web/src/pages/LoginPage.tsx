@@ -14,6 +14,7 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import LogoMark from '../components/LogoMark';
 import { colors, shadows } from '../theme';
 
 type NavState = { from?: string };
@@ -63,8 +64,16 @@ export default function LoginPage() {
         }}
       >
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          {/*
+            Centered logo mark above the wordmark. On the white card we use
+            the softer neutral-gray stripe color (#98A2B3 default) so the
+            teal accent is the eye-catcher without feeling too heavy.
+          */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
+            <LogoMark size={56} />
+          </div>
           <h1 style={{ margin: 0, color: colors.midnightNavy, fontSize: '22px', fontWeight: 700 }}>
-            <span style={{ color: colors.electricTeal }}>S.IS</span> Production Aggregator
+            <span style={{ color: colors.electricTeal }}>Stewardship.IS</span> Production Aggregator
           </h1>
           <p style={{ margin: '8px 0 0 0', color: colors.darkGray, fontSize: '13px' }}>
             Sign in to access production data.
@@ -115,7 +124,10 @@ export default function LoginPage() {
             type="submit"
             disabled={submitting}
             style={{
-              backgroundColor: submitting ? colors.steelBlue : colors.electricTeal,
+              // CTA = primary blue. The teal is reserved for the brand
+              // wordmark + logo accent, so the eye lands on "Stewardship.IS"
+              // first and the Sign-in button second.
+              backgroundColor: submitting ? colors.darkGray : colors.primary,
               color: colors.white,
               border: 'none',
               padding: '12px 16px',

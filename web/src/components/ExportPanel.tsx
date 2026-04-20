@@ -206,7 +206,10 @@ export default function ExportPanel({
           disabled={submitting}
           style={{
             alignSelf: 'flex-start',
-            backgroundColor: submitting ? colors.steelBlue : colors.electricTeal,
+            // CTA color = primary blue (matches the Sign-in button on Login).
+            // Teal is reserved for brand accents like the help-callout border
+            // and the logo mark — not for action buttons.
+            backgroundColor: submitting ? colors.darkGray : colors.primary,
             color: colors.white,
             border: 'none',
             padding: '11px 22px',

@@ -2,17 +2,19 @@
  * Layout — the persistent chrome around authenticated pages.
  *
  * Shows:
- *   - Header with S.IS branding + nav links + sign-out button
+ *   - Header with Stewardship.IS logo mark + wordmark + nav links + sign-out button
  *   - Main content area (via <Outlet />)
  *   - Small footer
  *
- * Deep Current palette styling everywhere. Header is midnight navy with the
- * active nav link highlighted in electric teal. Non-active nav links sit in
- * steel blue so they read as "secondary" but stay readable.
+ * Stewardship.IS palette everywhere. Header is midnight navy with the
+ * active nav link highlighted in electric teal, and a small inline SVG logo
+ * mark to the left of the product wordmark. Non-active nav links sit in
+ * a muted steel-blue gray so they read as "secondary" but stay readable on navy.
  */
 
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import LogoMark from './LogoMark';
 import { colors, shadows } from '../theme';
 
 const navLinks = [
@@ -47,8 +49,23 @@ export default function Layout() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }}>
-          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-            <span style={{ color: colors.electricTeal }}>S.IS</span>{' '}
+          <h1
+            style={{
+              margin: 0,
+              fontSize: '18px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+            }}
+          >
+            {/*
+              Logo mark stays tasteful at 28px — the stripe color is bumped
+              to a brighter gray (#B6BFCB) so it reads cleanly against the
+              midnight-navy header, while the teal accent stays on-brand.
+            */}
+            <LogoMark size={28} stripe={colors.steelBlue} accent={colors.electricTeal} />
+            <span style={{ color: colors.electricTeal }}>Stewardship.IS</span>{' '}
             <span style={{ color: colors.white }}>Production Aggregator</span>
           </h1>
           <nav style={{ display: 'flex', gap: '20px' }}>
