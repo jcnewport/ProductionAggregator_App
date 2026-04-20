@@ -21,6 +21,8 @@ import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 import { arloPartnerReportXlsxAdapter } from './arloPartnerReportXlsx.js';
 import { hierarchicalAllocatedXlsxAdapter } from './hierarchicalAllocatedXlsx.js';
+import { btaDailyPerWellXlsxAdapter } from './btaDailyPerWellXlsx.js';
+import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -314,59 +316,40 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Flat "partner-report" sheet. Handles Arlo (numeric API) and Pinon (hyphenated API). Excel serial dates converted via XLSX.SSF.parse_date_code. PIP/HZ/Comments preserved in extraFields. No Oil/Gas Sales in this format — stored as null.',
   },
 
-  // ─── Format 8 — BTA WIO Mailout PDF (STUB) ───
+  // ─── Format 8 — BTA WIO Mailout PDF (IMPLEMENTED) ───
   //
-  // The BTA WIO Mailout has a very different structure than PDS reports. The
-  // first page shows column headers that pdf-parse emits as split lines:
-  //   "InvestorDateOil"
-  //   "Prod"
-  //   "Oil"
-  //   "Sold"     ← cannot rely on "Oil Sold" as a contiguous substring
-  // The reliable unique markers are the operator identity block:
-  //   "BTA Oil Producers, LLC"
-  //   "WIO@btaoil.com"
-  // plus the "Investor" column label.
+  // pdf-parse's default text output concatenates the 4 numeric columns with
+  // no separator (e.g. "11844118151401413361"), which is unrecoverable by
+  // string-slicing. Our parser overrides pdf-parse's `pagerender` option so
+  // it can read each text item with its x/y coordinate and bucket items
+  // into columns by x. Detect still uses the plain-text output since the
+  // operator identity strings ("BTA Oil Producers", "Investor", "WIO@btaoil.com")
+  // survive the default rendering intact.
   {
-    adapter: stubAdapter({
-      name: 'BTA WIO Mailout Monthly',
-      operatorName: 'BTA Oil Producers',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@btaoil\.com$/i, /@btaoilproducers\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        /BTA\s*Oil\s*Producers/i.test(ctx.pdfText) &&
-        /Investor/i.test(ctx.pdfText) &&
-        // Either the WIO email or the operator's Midland address — both are stable
-        // signatures even if the header row gets mangled by pdf-parse line breaks.
-        (/WIO@btaoil\.com/i.test(ctx.pdfText) || /Midland,\s*TX/i.test(ctx.pdfText)),
-    }),
-    sampleFile: 'February_2026_West_Pecos_Trading_WIO_Mailout.pdf',
-    status: 'stub',
+    adapter: btaWioMailoutPdfAdapter,
+    sampleFile: 'February 2026 West Pecos Trading WIO Mailout.pdf',
+    status: 'implemented',
     notes:
-      'MEDIUM complexity. No API. No Water Prod. "Investor" column = well name. Needs well name → API lookup table (well_name_aliases). Column header text is fragmented across lines in pdf-parse output — detect on operator identity instead.',
+      'MEDIUM complexity. No API, no Water Prod, no pressure/choke. Positional (x/y coord) extraction required because pdf-parse concatenates numeric columns without separators. 4 columns by x: Oil Prod | Oil Sold | Gas Prod | Gas Sold. Dates normalized to first-of-month; raw end-of-month date preserved in extraFields.rawProdDate. Needs well_name_aliases for API resolution.',
   },
 
-  // ─── Format 9 — BTA Daily Per-Well Sheets XLSX (STUB) ───
+  // ─── Format 9 — BTA Daily Per-Well Sheets XLSX (IMPLEMENTED) ───
+  //
+  // Detects on header-row shape ("Well Site | Date | Oil | Gas | Water | Tubing
+  // Pressure | ...") PLUS the first-data-row "Well Site" cell matching BTA's
+  // compound pattern ("<name> (<code>) - <wellNum>"). This signature is strong
+  // enough to match future BTA workbooks even if sheet names change away from
+  // the sample's "Hideout 1H" / "Box Elder 3H" pattern.
+  //
+  // The parser walks EVERY sheet, which is important because BTA's per-well
+  // convention means each sheet = one well. "Grand Total" summary rows at the
+  // bottom of each sheet are filtered by the well-site string check.
   {
-    adapter: stubAdapter({
-      name: 'BTA Daily Per-Well Sheets',
-      operatorName: 'BTA Oil Producers',
-      dataType: 'daily',
-      fileKinds: ['xlsx'] as const,
-      detect: (ctx) => {
-        // Signature: multi-sheet with sheet names like "Hideout 1H", "Box Elder 3H"
-        if (!ctx.sheetNames || ctx.sheetNames.length < 2) return false;
-        const looksBta = ctx.sheetNames.some((n) =>
-          /hideout|box\s*elder/i.test(n)
-        );
-        return looksBta;
-      },
-    }),
-    sampleFile: 'March_2026_Daily_Production.xlsx',
-    status: 'stub',
+    adapter: btaDailyPerWellXlsxAdapter,
+    sampleFile: 'March 2026 Daily Production.xlsx',
+    status: 'implemented',
     notes:
-      'Multi-sheet (one sheet per well). Well Site column has compound "Name (code) - WellNum". Choke as string "64/64". Has downtime data.',
+      'Multi-sheet (one sheet per well). Well Site cell parsed into wellName + site code + operatorWellId. Choke preserved as string "64/64". No API column → api10/api14 empty, downstream well_name_aliases resolves. Down Time Reason + Down Time Notes merged into downtimeReason.',
   },
 
   // ─── Format 10 + 35 — Hierarchical Allocated-Production XLSX (IMPLEMENTED) ───
