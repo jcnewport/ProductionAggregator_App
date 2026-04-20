@@ -24,7 +24,7 @@ interface LogoMarkProps {
 export default function LogoMark({
   size = 32,
   stripe = '#98A2B3',
-  accent = '#2FA4A9',
+  accent = '#5DCEAF', // palette Accent 4 — matches colors.electricTeal in /src/theme.ts
   style,
 }: LogoMarkProps) {
   return (
