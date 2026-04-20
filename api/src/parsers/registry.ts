@@ -19,6 +19,7 @@ import type { FormatAdapter, ParserContext, ProductionRecord, RegisteredFormat }
 import { pdsAnadarkoMonthlyAdapter } from './pdsAnadarkoMonthly.js';
 import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
+import { arloPartnerReportXlsxAdapter } from './arloPartnerReportXlsx.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -292,22 +293,24 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Alias-driven. Catches Frio-family and partner-report CSVs that each have unique column layouts. Drift-tolerant: tries ±1/±2 row shifts if API/date don\'t type-check. Classifies daily vs monthly from date cadence + filename. Skip list explicitly excludes tank-gauge (Oil Begin/End), cumulative (OilCum/GasCum), and gas-injection columns so they never miscode as production.',
   },
 
-  // ─── Format 7 — Arlo Production XLSX (STUB) ───
+  // ─── Format 7 — Arlo / Pinon Partner Report XLSX (IMPLEMENTED) ───
+  //
+  // Covers BOTH the Arlo export and the Pinon export because they share
+  // an identical "partner-report" sheet shape (Date | Well Name | API # |
+  // Oil/Gas/Water Production | Tubing | Casing | PIP | HZ | Comments).
+  //
+  // Quirks the adapter handles:
+  //   - Excel serial-number dates (46081 → 2026-03-20)
+  //   - API variants: numeric (Arlo: 4211534077) vs hyphenated (pinon: "42-115-34077")
+  //   - No Oil/Gas Sales → stored as null (not 0)
+  //   - PIP, HZ, Comments kept in extraFields
+  //   - First-occurrence-wins for duplicate header → canonical mappings
   {
-    adapter: stubAdapter({
-      name: 'Arlo Partner Report XLSX',
-      operatorName: 'Arlo',
-      dataType: 'daily',
-      fileKinds: ['xlsx'] as const,
-      detect: (ctx) => {
-        if (!ctx.sheetNames) return false;
-        return ctx.sheetNames.some((n) => /partner.?report/i.test(n));
-      },
-    }),
-    sampleFile: '2026_03_30_Arlo_Production.xlsx',
-    status: 'stub',
+    adapter: arloPartnerReportXlsxAdapter,
+    sampleFile: '2026.03.30 Arlo Production.xlsx',
+    status: 'implemented',
     notes:
-      'Single sheet "partner-report". Only Prod columns, no Sales. PIP and HZ are extra metadata. No Choke, no Hours Down.',
+      'Flat "partner-report" sheet. Handles Arlo (numeric API) and Pinon (hyphenated API). Excel serial dates converted via XLSX.SSF.parse_date_code. PIP/HZ/Comments preserved in extraFields. No Oil/Gas Sales in this format — stored as null.',
   },
 
   // ─── Format 8 — BTA WIO Mailout PDF (STUB) ───
