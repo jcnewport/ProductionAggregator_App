@@ -158,6 +158,103 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Has pressure data (Tubing, Casing, BHP). API is 12-digit. Oil Sales column appears blank in samples. BHP stored as extra metadata.',
   },
 
+  // ─── Format 5a — PDS Anadarko Daily (STUB) ───
+  //
+  // Daily variant of Format 1. Same PDS boilerplate ("Daily Production
+  // Estimates" + "PDS Well Data Exchange") but identified by operator name
+  // "Anadarko Petroleum Corporation". Column set: Oil Prod, Oil Sales, Gas
+  // Prod, Gas Sales, Water Prod, Water Inject, Tubing Pres., Casing Pres,
+  // Choke, Downtime, Downtime Reason. 14-digit API. Mirrors the monthly
+  // layout but with daily granularity.
+  {
+    adapter: stubAdapter({
+      name: 'PDS Anadarko Daily',
+      operatorName: 'Anadarko Petroleum (Oxy)',
+      dataType: 'daily',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@pdswdx\.com$/i, /@frioenergy\.com$/i, /@oxy\.com$/i],
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
+        /Anadarko\s*Petroleum/i.test(ctx.pdfText),
+    }),
+    sampleFile: 'PDSWDX-DP-Anadarko- DAILY.pdf',
+    status: 'stub',
+    notes:
+      'Mirror of Format 1 Anadarko Monthly but daily granularity. 14-digit API. Has full pressure/choke/downtime columns. "Water Inject" (with t) and "Downtime" (single word) distinguish from EOG Daily.',
+  },
+
+  // ─── Format 5b — PDS EOG Daily (STUB) ───
+  //
+  // Daily variant of Format 2. Column header differences from Anadarko
+  // Daily: "Water Inj" (no 't'), "Hours Down" (vs "Downtime"). Detect on
+  // operator name "EOG Resources" plus the "Water Inj" signature.
+  {
+    adapter: stubAdapter({
+      name: 'PDS EOG Daily',
+      operatorName: 'EOG Resources',
+      dataType: 'daily',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@pdswdx\.com$/i, /@frioenergy\.com$/i, /@eogresources\.com$/i],
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
+        /EOG\s*Resources/i.test(ctx.pdfText) &&
+        /Water\s*Inj(?!ect)/i.test(ctx.pdfText), // "Water Inj" but NOT "Water Inject"
+    }),
+    sampleFile: 'PDSWDX-DP-EOG-DAILY.pdf',
+    status: 'stub',
+    notes:
+      'Mirror of Format 2 EOG Monthly but daily granularity. "Water Inj" (no t) and "Hours Down" column headers. 14-digit API. LINK VJ RANCH pad seen in samples.',
+  },
+
+  // ─── Format 5c — PDS Mewbourne Daily (STUB) ───
+  //
+  // Daily variant of Format 3. Inherits all the Mewbourne-Monthly complexity:
+  // 8-digit API (needs padding), extra columns (BTU, Oil Begin/End, Compl.ID
+  // — tank gauges, NOT production). Detect on operator name.
+  {
+    adapter: stubAdapter({
+      name: 'PDS Mewbourne Daily',
+      operatorName: 'Mewbourne Oil Company',
+      dataType: 'daily',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@pdswdx\.com$/i, /@mewbourne\.com$/i],
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
+        /Mewbourne\s*Oil/i.test(ctx.pdfText),
+    }),
+    sampleFile: 'PDSWDX-DP-mewbourne-DAILY.pdf',
+    status: 'stub',
+    notes:
+      'HIGH complexity — mirror of Format 3 Mewbourne Monthly with daily granularity. 8-digit API (pad to 14). BTU, Oil Begin/End are tank inventory, do NOT map to Oil Prod/Sales. Footer: "Mewbourne only provides Daily production for first 2 years of well life."',
+  },
+
+  // ─── Format 5d — PDS XTO Daily (STUB) ───
+  //
+  // Daily variant of Format 4. XTO reports lead with "XTO Energy, Inc." and
+  // the Fort Worth address block instead of the standard PDS boilerplate.
+  // Column headers use concatenated forms: "WellNumWellName", "OilProdOilSales",
+  // "WaterProdWaterInj". Has cumulative columns to exclude.
+  {
+    adapter: stubAdapter({
+      name: 'PDS XTO Daily',
+      operatorName: 'XTO Energy (ExxonMobil)',
+      dataType: 'daily',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@pdswdx\.com$/i, /@xtoenergy\.com$/i, /@exxonmobil\.com$/i],
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        /XTO\s*Energy/i.test(ctx.pdfText) &&
+        /Daily\s*Production\s*Estimates/i.test(ctx.pdfText),
+    }),
+    sampleFile: 'PDSWDX-DP-XTO-DAILY.pdf',
+    status: 'stub',
+    notes:
+      'HIGH complexity — mirror of Format 4 XTO Monthly with daily granularity. Cumulative cols (not in daily but watch for them), GasInj, Producing/Well Status, Oil Begin/End tank gauges. Concatenated header labels ("WellNumWellName", "OilProdOilSales") need custom tokenization.',
+  },
+
   // ─── Format 6 — Aftermath Dailies CSV (IMPLEMENTED) ───
   {
     adapter: aftermathDailiesCsvAdapter,
