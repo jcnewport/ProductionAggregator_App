@@ -306,10 +306,19 @@ export async function generateComboCurveExport(
   const sheetName = type === 'monthly' ? 'Monthly Production' : 'Daily Production';
   const wb = buildWorkbook(dataRows, sheetName);
 
+  // Write options:
+  //   - type: 'buffer'   → return raw bytes (so we can stream to the HTTP response)
+  //   - bookType: 'xlsx' → modern Excel format
+  //   - compression: true → smaller files; required to avoid some Mac Excel quirks
+  //   - cellStyles is intentionally OMITTED. When enabled, SheetJS writes a
+  //     customUI14.xml fragment with an `mso:AutoSaveSwitch` control Excel for Mac
+  //     doesn't recognize, which pops an "Error Loading Custom UI XML" dialog on
+  //     first open. The file itself is valid; the dialog is cosmetic but alarming.
+  //     We don't rely on cell styles anyway (SheetJS CE strips wrap_text on write).
   const buffer: Buffer = XLSX.write(wb, {
     type: 'buffer',
     bookType: 'xlsx',
-    cellStyles: true,
+    compression: true,
   });
 
   return {

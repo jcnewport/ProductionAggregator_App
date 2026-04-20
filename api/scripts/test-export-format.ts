@@ -102,7 +102,7 @@ const wb = buildWorkbook(dataRows, 'Monthly Production');
 
 // Write to an absolute /tmp path so we can inspect with python
 const outPath = '/tmp/combocurve_export_test.xlsx';
-const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', cellStyles: true });
+const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx', compression: true });
 fs.writeFileSync(outPath, buffer);
 
 console.log(`Wrote ${dataRows.length} rows → ${outPath} (${buffer.length} bytes)`);

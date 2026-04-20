@@ -23,30 +23,11 @@
  */
 
 import pdfParse from 'pdf-parse';
+import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
 
-/** A single well-month production record, normalized to our internal schema. */
-export interface ProductionRecord {
-  api14: string;
-  api10: string;
-  wellName: string;
-  combocurveWellId: number | null;
-  operatorWellId: number | null; // The operator's internal ID (e.g., 392398)
-  prodDate: string;              // YYYY-MM-DD (first of month convention — see note below)
-  oilProd: number | null;
-  gasProd: number | null;
-  waterProd: number | null;
-  gasSales: number | null;
-  oilSales: number | null;
-  waterInj: number | null;
-  daysOn: number | null;
-  // Unused fields for this format but kept for schema consistency:
-  choke: string | null;
-  tubingPres: number | null;
-  casingPres: number | null;
-  hoursDown: number | null;
-  downtimeReason: string | null;
-  extraFields: Record<string, unknown>;
-}
+// Re-export so any existing callers (e.g. services/productionStorage.ts) that
+// imported `ProductionRecord` from this file keep compiling.
+export type { ProductionRecord } from './types.js';
 
 /**
  * Parse a number that may contain commas. Returns null for empty / non-numeric input.
@@ -79,16 +60,23 @@ function normalizeMonthlyDate(isoDate: string): string {
 /**
  * Check that the PDF contains the PDS Anadarko header signature.
  * Called by the parser dispatcher to confirm format before parsing.
+ *
+ * IMPORTANT: Anadarko and EOG PDFs both come from Frio Energy on the PDS
+ * platform, so they share "Monthly Production Estimates", "FRIO ENERGY HOLDINGS",
+ * and "PDS Well Data Exchange". The distinguishing markers live in the column
+ * header row:
+ *   Anadarko: "Water Inject" (with 't') and "Days On" (with space)
+ *   EOG:      "Water Inj"    (no 't')    and "DaysOn"  (no space)
+ * We check for the Anadarko-specific spellings here to avoid false positives.
  */
 export function isPdsAnadarkoMonthly(rawText: string): boolean {
-  // Signature markers in this exact PDF:
-  //   "Monthly Production Estimates"
-  //   "FRIO ENERGY HOLDINGS I LLC" (Frio is Anadarko's distribution partner)
-  //   "PDS Well Data Exchange"
   const hasMonthlyHeader = /Monthly Production Estimates/i.test(rawText);
   const hasFrio = /FRIO ENERGY HOLDINGS/i.test(rawText);
   const hasPds = /PDS Well Data Exchange/i.test(rawText);
-  return hasMonthlyHeader && hasFrio && hasPds;
+  // Anadarko-specific column labels (EOG uses "Water Inj" and "DaysOn" without space)
+  const hasAnadarkoColumns =
+    /Water\s*Inject/i.test(rawText) && /Days\s+On\b/i.test(rawText);
+  return hasMonthlyHeader && hasFrio && hasPds && hasAnadarkoColumns;
 }
 
 /**
@@ -211,3 +199,39 @@ export async function parseAnadarkoMonthlyPdf(
 
   return records;
 }
+
+/**
+ * FormatAdapter registration — exposed so parsers/registry.ts can plug this in.
+ * The adapter relies on the dispatcher pre-populating ctx.pdfText so we don't
+ * re-parse the PDF during detect().
+ */
+export const pdsAnadarkoMonthlyAdapter: FormatAdapter = {
+  name: 'PDS Anadarko Monthly',
+  operatorName: 'Anadarko (Oxy)',
+  dataType: 'monthly',
+  fileKinds: ['pdf'] as const,
+  // Frio Energy distributes Anadarko data; any email from a @frioenergy.com or
+  // explicit PDS sender is a strong hint but not definitive (we still confirm
+  // via detect() to avoid false positives on unrelated files from the same sender).
+  senderEmailPatterns: [/@frioenergy\.com$/i, /@pdswdx\.com$/i] as const,
+
+  detect(ctx: ParserContext): boolean {
+    if (!ctx.pdfText) return false;
+    return isPdsAnadarkoMonthly(ctx.pdfText);
+  },
+
+  async parse(ctx: ParserContext): Promise<ProductionRecord[]> {
+    // Use the pre-sniffed text when available — saves re-parsing the PDF.
+    if (ctx.pdfText) {
+      const records = parseAnadarkoText(ctx.pdfText);
+      if (records.length === 0) {
+        throw new Error(
+          'PDS Anadarko Monthly PDF parsed but yielded zero rows. Possible format drift.'
+        );
+      }
+      return records;
+    }
+    // Fallback — shouldn't happen in normal dispatcher flow.
+    return parseAnadarkoMonthlyPdf(ctx.buffer);
+  },
+};

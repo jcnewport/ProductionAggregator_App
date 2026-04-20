@@ -136,13 +136,20 @@ export async function processMessage(messageId: string): Promise<void> {
 
         if (outcome.kind === 'unrecognized') {
           errors.push(
-            `[${attachment.filename}] Unrecognized format — flagged for manual review`
+            `[${attachment.filename}] Unrecognized format — flagged for manual review. ` +
+              `Details: ${outcome.reason}`
           );
           continue;
         }
 
         if (outcome.kind === 'error') {
-          errors.push(`[${attachment.filename}] Parser error: ${outcome.message}`);
+          // When the dispatcher identified the format but the parser is a stub
+          // or failed, include the format name so the dashboard can show exactly
+          // what was detected.
+          const formatTag = outcome.matchedFormatName ? `[${outcome.matchedFormatName}] ` : '';
+          errors.push(
+            `[${attachment.filename}] ${formatTag}Parser error: ${outcome.message}`
+          );
           continue;
         }
 
@@ -158,6 +165,15 @@ export async function processMessage(messageId: string): Promise<void> {
           await storeMonthlyRecords(outcome.records, context);
         } else if (outcome.dataType === 'daily') {
           await storeDailyRecords(outcome.records, context);
+        } else {
+          // Weekly should be divided into daily rows by the parser BEFORE
+          // reaching here (per project rules). If we ever see dataType='weekly'
+          // at this point, the parser didn't do its job — flag loudly.
+          errors.push(
+            `[${attachment.filename}] Parser returned dataType='${outcome.dataType}' — ` +
+              `weekly data must be pre-divided into daily rows by the parser.`
+          );
+          continue;
         }
         attachmentsProcessed++;
       } catch (err) {
