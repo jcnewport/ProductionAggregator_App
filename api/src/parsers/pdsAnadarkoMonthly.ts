@@ -5,13 +5,21 @@
  * Operator:      Anadarko (Oxy / Occidental Petroleum) via Frio Energy Holdings I LLC
  * Data type:     MONTHLY production estimates
  *
- * Extracted text layout (one row per well-month):
- *   [API14] [YYYY-MM-DD] [OilProd] [GasProd] [WaterProd] [GasSales] [OilSales] [WellName] [WellID] [DaysOn] [WaterInject]
+ * pdf-parse emits each production record as THREE lines, not one:
  *
- * NOTE: The visual PDF header reads "Well Name | API | Prod Date | Oil Prod | Gas Prod | Water Prod |
- * Well ID | Gas Sales | Oil Sales | Water Inject | Days On", but pdf-parse's text extraction
- * reorders the positional stream. The order above is what we actually see in the extracted text.
- * Verified against PDSWDX-MP-Anadarko-MONTHLY.pdf on 2026-04-20.
+ *   Line A: {API14}{YYYY-MM-DD} {OilProd} {GasProd} {WaterProd} {GasSales}
+ *           (API14 and Date are concatenated with NO separator)
+ *   Line B: ` {OilSales}`   (single indented number — may equal OilProd or differ slightly)
+ *   Line C: {WellName}{OperatorWellID} {DaysOn} {WaterInj}
+ *           (WellName and OperatorWellID concatenated — e.g. "FLEA FLICKER A 1BS392398"
+ *            means name "FLEA FLICKER A 1BS" + operator well id 392398)
+ *
+ * The visual PDF header reads "Well Name | API | Prod Date | Oil Prod | Gas Prod | Water Prod |
+ * Well ID | Gas Sales | Oil Sales | Water Inject | Days On", but the positional text stream
+ * reorders columns into the A/B/C structure above.
+ *
+ * Verified by re-running pdf-parse against PDSWDX-MP-Anadarko-MONTHLY.pdf on 2026-04-20 after
+ * initial parser returned zero rows on real Gmail-delivered attachment.
  */
 
 import pdfParse from 'pdf-parse';
@@ -90,81 +98,76 @@ export function isPdsAnadarkoMonthly(rawText: string): boolean {
 export function parseAnadarkoText(rawText: string): ProductionRecord[] {
   const records: ProductionRecord[] = [];
 
-  // Each valid data row starts with a 14-digit API number followed by a YYYY-MM-DD date.
-  // We use this as our anchor to filter out headers, totals, page separators, and footer text.
-  const rowAnchor = /^(\d{14})\s+(\d{4}-\d{2}-\d{2})\s+(.+)$/;
+  // Number token: optional minus, digits (with optional commas), optional decimal
+  const NUM = String.raw`-?[\d,]+(?:\.\d+)?`;
 
-  // Split text into lines and strip tabs (pdf-parse inserts them in some column groups)
+  // Line A: {API14}{YYYY-MM-DD} {OilProd} {GasProd} {WaterProd} {GasSales}
+  // API14 and Date are CONCATENATED with no separator.
+  const lineARegex = new RegExp(
+    `^(\\d{14})(\\d{4}-\\d{2}-\\d{2})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s+(${NUM})\\s*$`
+  );
+
+  // Line B: single number (usually indented with leading whitespace)
+  const lineBRegex = new RegExp(`^\\s*(${NUM})\\s*$`);
+
+  // Line C: {WellName (may contain spaces and digits)}{OperatorWellID} {DaysOn} {WaterInj}
+  // OperatorWellID is 4–7 consecutive digits smushed onto the end of the last name-token.
+  // We split by whitespace: last 2 tokens are DaysOn + WaterInj, remaining tokens joined
+  // form the "{Name}{ID}" compound string, which we then split by trailing digits.
+  const compoundNameIdSplit = /^(.+?)(\d{4,7})$/;
+
   const lines = rawText.split(/\r?\n/);
 
-  for (const rawLine of lines) {
-    // Collapse all whitespace (tabs and multiple spaces) into single spaces for tokenizing
-    const line = rawLine.replace(/\s+/g, ' ').trim();
-    if (!line) continue;
+  for (let i = 0; i < lines.length - 2; i++) {
+    const a = lines[i];
+    const b = lines[i + 1];
+    const c = lines[i + 2];
 
-    const match = line.match(rowAnchor);
-    if (!match) continue;
+    const matchA = a.match(lineARegex);
+    if (!matchA) continue;
 
-    const [, api14, isoDate, rest] = match;
+    const matchB = b.match(lineBRegex);
+    if (!matchB) continue;
 
-    // After the API and date, the remaining tokens are:
-    // [OilProd] [GasProd] [WaterProd] [GasSales] [OilSales] [WellName... possibly multiple words] [WellID] [DaysOn] [WaterInject]
-    //
-    // Strategy: the 5 volume numbers come first (numeric-only tokens),
-    // then the well name (mixed tokens), then a 6-digit numeric well_id,
-    // then days-on and water-inject (last two numerics).
-    //
-    // We reverse-tokenize from the end: last 2 tokens = DaysOn + WaterInject,
-    // then next numeric token = WellID, and everything remaining is first 5 numerics + well name.
-    const tokens = rest.split(' ').filter((t) => t.length > 0);
-    if (tokens.length < 9) {
-      // Not a well-formed row — skip defensively
-      continue;
-    }
+    // Defensive: don't let line C itself look like another line A (would mean B was malformed)
+    if (lineARegex.test(c)) continue;
 
-    // Last two: Days On, Water Inject
-    const waterInj = parseNum(tokens[tokens.length - 1]);
-    const daysOn = parseNum(tokens[tokens.length - 2]);
+    // Parse line C — split by whitespace, last 2 tokens are DaysOn + WaterInj
+    const cTokens = c.trim().split(/\s+/).filter((t) => t.length > 0);
+    if (cTokens.length < 3) continue;
 
-    // Walk backwards to find the well_id — a purely numeric token (no commas, no decimal)
-    // that sits just after the well name text. In this format it's a 5–7 digit integer.
-    let wellIdIndex = -1;
-    for (let i = tokens.length - 3; i >= 0; i--) {
-      const t = tokens[i];
-      if (/^\d{4,7}$/.test(t)) {
-        wellIdIndex = i;
-        break;
-      }
-    }
-    if (wellIdIndex === -1) continue;
+    const waterInjTok = cTokens[cTokens.length - 1];
+    const daysOnTok = cTokens[cTokens.length - 2];
 
-    const operatorWellId = parseInt(tokens[wellIdIndex], 10);
+    // Last two must parse as numbers (otherwise this isn't a valid Line C)
+    if (!/^[\d.,\-]+$/.test(waterInjTok) || !/^[\d.,\-]+$/.test(daysOnTok)) continue;
 
-    // The first 5 tokens are the volume numbers
-    const oilProd = parseNum(tokens[0]);
-    const gasProd = parseNum(tokens[1]);
-    const waterProd = parseNum(tokens[2]);
-    const gasSales = parseNum(tokens[3]);
-    const oilSales = parseNum(tokens[4]);
+    // Remaining tokens form the "{Name}{ID}" compound
+    const compound = cTokens.slice(0, -2).join(' ');
+    const nameIdMatch = compound.match(compoundNameIdSplit);
+    if (!nameIdMatch) continue;
 
-    // Everything between index 5 and wellIdIndex-1 is the well name
-    const wellName = tokens.slice(5, wellIdIndex).join(' ').trim();
+    const wellName = nameIdMatch[1].trim();
+    const operatorWellId = parseInt(nameIdMatch[2], 10);
     if (!wellName) continue;
+
+    const [, api14, isoDate, oilProdStr, gasProdStr, waterProdStr, gasSalesStr] = matchA;
+    const oilSalesStr = matchB[1];
 
     records.push({
       api14,
       api10: toApi10(api14),
       wellName,
-      combocurveWellId: null, // Will be resolved later via ComboCurve lookup table (Phase 3)
+      combocurveWellId: null, // Resolved later via ComboCurve lookup table
       operatorWellId,
       prodDate: normalizeMonthlyDate(isoDate),
-      oilProd,
-      gasProd,
-      waterProd,
-      gasSales,
-      oilSales,
-      waterInj,
-      daysOn,
+      oilProd: parseNum(oilProdStr),
+      gasProd: parseNum(gasProdStr),
+      waterProd: parseNum(waterProdStr),
+      gasSales: parseNum(gasSalesStr),
+      oilSales: parseNum(oilSalesStr),
+      waterInj: parseNum(waterInjTok),
+      daysOn: parseNum(daysOnTok),
       // Not reported in this monthly format:
       choke: null,
       tubingPres: null,
@@ -172,10 +175,13 @@ export function parseAnadarkoText(rawText: string): ProductionRecord[] {
       hoursDown: null,
       downtimeReason: null,
       extraFields: {
-        originalDate: isoDate, // Keep the month-end date in case we ever want to verify
+        originalDate: isoDate, // Month-end date from the PDF; we normalize to first-of-month above
         operatorProvidedWellId: operatorWellId,
       },
     });
+
+    // Advance past this 3-line record — minus 1 because the loop's i++ takes us to i+3
+    i += 2;
   }
 
   return records;
