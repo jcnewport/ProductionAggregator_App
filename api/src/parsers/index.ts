@@ -29,6 +29,7 @@ import type {
   ProductionRecord,
 } from './types.js';
 import { FORMAT_REGISTRY } from './registry.js';
+import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 
 // Re-export so callers (services/productionStorage.ts) can keep their import.
 export type { ProductionRecord } from './types.js';
@@ -189,6 +190,23 @@ export async function dispatchParser(
 
     // Found a matching adapter — try to parse.
     try {
+      // Special case: the Generic CSV adapter decides daily vs monthly
+      // per-file by inspecting the date cadence. We call its extended
+      // entry point so the dispatcher can report the correct dataType
+      // to the storage layer (which routes to production_daily vs
+      // production_monthly). Everyone else uses the static dataType
+      // from the adapter definition.
+      if (adapter === genericProductionCsvAdapter) {
+        const result = await genericProductionCsvAdapter.parseWithClassification(ctx);
+        return {
+          kind: 'parsed',
+          operatorName: adapter.operatorName,
+          formatName: adapter.name,
+          dataType: result.dataType,
+          records: result.records,
+        };
+      }
+
       const records = await adapter.parse(ctx);
       return {
         kind: 'parsed',

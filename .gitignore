@@ -14,10 +14,35 @@ gmail-credentials.json
 # Client data files — stay out of the repo
 well_Frio_Energy_Holdings_I*.csv
 ComboCurve_export_sample.xlsx
-# Operator sample files dropped at project root during Phase 1 parser development.
+# Operator sample files dropped at project root during parser development.
 # These are real client production numbers — must never be committed.
 *Aftermath*Dailies*.csv
 *_Aftermath_*.csv
+# Frio-family operator CSVs (all live client production data).
+# Per memory project_phase1_status.md the YYYY.MM.DD naming is canonical.
+20*.*.* *.csv
+20*.*.*.csv
+*Daily Production*.csv
+*Monthly Production*.csv
+*Dailies*.csv
+*Monthly*.csv
+# Hierarchical + partner-report XLSX files dropped for parser work
+Monthly Report*.xlsx
+*Tap Rock*
+*Partner Report*
+*pinonPartnerReport*
+*Frio_Daily_Production*
+*West_Pecos_Production_Data*
+*West Pecos*
+
+# PDS Daily PDFs — new variants arriving in Caleb's real email batch.
+# Original monthly PDFs (no "(1)" suffix) ARE tracked as format samples.
+PDSWDX-DP-*.pdf
+*PDSWDX*(1)*
+# Outlook's "(1)" duplicate copies of anything — never commit
+*\(1\).pdf
+*\(1\).xlsx
+*\(1\).csv
 
 # Root-level package-lock (we use per-package locks in /api and /web)
 /package-lock.json

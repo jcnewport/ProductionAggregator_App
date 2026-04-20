@@ -18,6 +18,7 @@
 import type { FormatAdapter, ParserContext, ProductionRecord, RegisteredFormat } from './types.js';
 import { pdsAnadarkoMonthlyAdapter } from './pdsAnadarkoMonthly.js';
 import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
+import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -164,6 +165,34 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     status: 'implemented',
     notes:
       'WELL ID and COMPLETION NO arrive as scientific notation (e.g. "1.00E+14") — parsed as integers, raw preserved in extraFields. 10-digit API is padded with trailing zeros to derive API14. Oil Sales column is always blank → stored as null (not 0). Bottomhole pressure kept in extraFields.bhp.',
+  },
+
+  // ─── Format 6b — Generic Production CSV (IMPLEMENTED, catches 25+ Frio-family variants) ───
+  //
+  // Must sit AFTER Aftermath so the strict Aftermath detector wins on its
+  // exact header signature. Generic adapter's detect() is deliberately loose:
+  // it accepts any CSV with at least one date column, one identity column
+  // (API or well name), and one production-volume column. Covers the 26
+  // distinct CSV header signatures found in Caleb's first real-email batch.
+  //
+  // Handles:
+  //   - Column-order variations (26 different orders observed)
+  //   - Label variants via big alias dictionary ("Oil Prod", "OIL PROD",
+  //     "OilProd", "Oil", "Oil (BBL)", "Alloc Oil (bbl)", etc.)
+  //   - Row-drift repair (global shift ±2 with API/date anchors)
+  //   - Auto-classify daily vs monthly from date cadence + filename hint
+  //   - Metadata columns (BTU, Oil Begin/End, Cumulative, etc.) preserved
+  //     in extraFields rather than miscoded as production
+  //
+  // The adapter overrides the registry's `dataType` by returning the
+  // classified value at parse time (see parsers/index.ts dispatcher).
+  {
+    adapter: genericProductionCsvAdapter,
+    sampleFile:
+      '2026.04.07 Flea Flicker Daily Prod All.csv (plus 25+ other signatures)',
+    status: 'implemented',
+    notes:
+      'Alias-driven. Catches Frio-family and partner-report CSVs that each have unique column layouts. Drift-tolerant: tries ±1/±2 row shifts if API/date don\'t type-check. Classifies daily vs monthly from date cadence + filename. Skip list explicitly excludes tank-gauge (Oil Begin/End), cumulative (OilCum/GasCum), and gas-injection columns so they never miscode as production.',
   },
 
   // ─── Format 7 — Arlo Production XLSX (STUB) ───
