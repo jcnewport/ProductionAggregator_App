@@ -14,7 +14,7 @@
  * Verified against PDSWDX-MP-Anadarko-MONTHLY.pdf on 2026-04-20.
  */
 
-import { PDFParse } from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 
 /** A single well-month production record, normalized to our internal schema. */
 export interface ProductionRecord {
@@ -188,8 +188,7 @@ export function parseAnadarkoText(rawText: string): ProductionRecord[] {
 export async function parseAnadarkoMonthlyPdf(
   buffer: Buffer
 ): Promise<ProductionRecord[]> {
-  const parser = new PDFParse({ data: buffer });
-  const result = await parser.getText();
+  const result = await pdfParse(buffer);
   const rawText: string = result.text;
 
   if (!isPdsAnadarkoMonthly(rawText)) {

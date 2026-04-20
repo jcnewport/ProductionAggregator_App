@@ -13,7 +13,7 @@ import {
   isPdsAnadarkoMonthly,
   ProductionRecord,
 } from './pdsAnadarkoMonthly.js';
-import { PDFParse } from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 import type { EmailAttachment } from '../services/gmail.js';
 
 export type ParserOutcome =
@@ -49,8 +49,7 @@ function isPdf(attachment: EmailAttachment): boolean {
  * dispatcher can route to the right parser.
  */
 async function sniffPdfText(buffer: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: buffer });
-  const result = await parser.getText();
+  const result = await pdfParse(buffer);
   return result.text;
 }
 
