@@ -6,3 +6,7 @@ build/
 *.log
 .DS_Store
 sample-data/
+
+# Google OAuth credentials — NEVER commit these
+client_secret_*.json
+gmail-credentials.json
