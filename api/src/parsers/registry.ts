@@ -20,6 +20,7 @@ import { pdsAnadarkoMonthlyAdapter } from './pdsAnadarkoMonthly.js';
 import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 import { arloPartnerReportXlsxAdapter } from './arloPartnerReportXlsx.js';
+import { hierarchicalAllocatedXlsxAdapter } from './hierarchicalAllocatedXlsx.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -368,26 +369,33 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Multi-sheet (one sheet per well). Well Site column has compound "Name (code) - WellNum". Choke as string "64/64". Has downtime data.',
   },
 
-  // ─── Format 10 — Hierarchical Monthly Report XLSX (STUB) ───
+  // ─── Format 10 + 35 — Hierarchical Allocated-Production XLSX (IMPLEMENTED) ───
+  //
+  // ONE adapter covers THREE distinct file sources because they share the
+  // hierarchical "well-name row → indented date rows" layout:
+  //   - Tap Rock Partner Report             (2026.03.03/04.03 Tap Rock Partner Report *.xlsx)
+  //   - West Pecos Partner Report           (PARTNER REPORT - WEST PECOS.xlsx)
+  //   - Gretchen / EFG STATE Monthly Report (Monthly Report.xlsx)
+  //
+  // Differences the adapter absorbs:
+  //   - Tap Rock / West Pecos have a 14-column header row with API, pressures,
+  //     choke, OpTm, DT (down time). Monthly Report has only 7 columns: name,
+  //     Alloc Oil, Alloc Wat, New Prod Gas — and NO API column at all.
+  //   - When API is missing, the parser leaves api10/api14 empty and relies
+  //     on downstream well_name_aliases lookup (never drops the record).
+  //   - The well-identity row's monthly totals are preserved in
+  //     extraFields.wellTotalBlock of the FIRST daily record for each well
+  //     so nothing is lost if Caleb later wants to spot-check.
+  //
+  // Detector: row 1 must have "Completion (Well )Name/Date" AND an
+  // "Alloc Oil/Gas/Wat" column OR "New Prod Gas". That's specific enough
+  // to avoid false matches against other Sheet1 workbooks.
   {
-    adapter: stubAdapter({
-      name: 'Hierarchical Monthly Report XLSX',
-      operatorName: 'Unknown (EFG STATE)',
-      dataType: 'daily',
-      fileKinds: ['xlsx'] as const,
-      detect: (ctx) => {
-        if (!ctx.sheetPreview || ctx.sheetPreview.length === 0) return false;
-        const flat = ctx.sheetPreview
-          .flat()
-          .map((c) => String(c ?? ''))
-          .join(' ');
-        return /Alloc\s*Oil/i.test(flat) && /New\s*Prod\s*Gas/i.test(flat);
-      },
-    }),
-    sampleFile: 'Monthly_Report.xlsx',
-    status: 'stub',
+    adapter: hierarchicalAllocatedXlsxAdapter,
+    sampleFile: '2026.03.03 Tap Rock Partner Report Feb 2026.xlsx',
+    status: 'implemented',
     notes:
-      'HIGH complexity. Hierarchical rows: well name row with monthly total, then indented date rows. "Alloc" = allocated production = Prod. No API — needs name lookup. Some negative values are valid.',
+      'Covers Tap Rock, West Pecos, and Gretchen/EFG Monthly Report — all share the hierarchical "well-identity row + indented date rows" layout. Handles missing-API case (Monthly Report). Negative values preserved. Well-total rows captured in extraFields.wellTotalBlock. OpTm in extraFields.opTmHr; DT (hr) → hoursDown.',
   },
 ];
 
