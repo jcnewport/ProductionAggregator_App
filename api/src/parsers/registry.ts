@@ -17,6 +17,7 @@
 
 import type { FormatAdapter, ParserContext, ProductionRecord, RegisteredFormat } from './types.js';
 import { pdsAnadarkoMonthlyAdapter } from './pdsAnadarkoMonthly.js';
+import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -156,28 +157,13 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Has pressure data (Tubing, Casing, BHP). API is 12-digit. Oil Sales column appears blank in samples. BHP stored as extra metadata.',
   },
 
-  // ─── Format 6 — Aftermath Dailies CSV (STUB) ───
+  // ─── Format 6 — Aftermath Dailies CSV (IMPLEMENTED) ───
   {
-    adapter: stubAdapter({
-      name: 'Aftermath Dailies CSV',
-      operatorName: 'Aftermath (Concho/ConocoPhillips)',
-      dataType: 'daily',
-      fileKinds: ['csv'] as const,
-      detect: (ctx) => {
-        if (!ctx.sheetPreview || ctx.sheetPreview.length === 0) return false;
-        const headers = ctx.sheetPreview[0]?.map((c) => String(c ?? '').toUpperCase()) ?? [];
-        return (
-          headers.includes('WELL ID') &&
-          headers.includes('COMPLETION NO') &&
-          headers.includes('PRODDATE') &&
-          /Aftermath|Dailies/i.test(ctx.filename)
-        );
-      },
-    }),
+    adapter: aftermathDailiesCsvAdapter,
     sampleFile: '2026_04_07_Aftermath_Dailies.csv',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'WELL ID and COMPLETION NO arrive as scientific notation (e.g. "1.00E+14") — parse as integers. 10-digit API. Oil Sales column blank.',
+      'WELL ID and COMPLETION NO arrive as scientific notation (e.g. "1.00E+14") — parsed as integers, raw preserved in extraFields. 10-digit API is padded with trailing zeros to derive API14. Oil Sales column is always blank → stored as null (not 0). Bottomhole pressure kept in extraFields.bhp.',
   },
 
   // ─── Format 7 — Arlo Production XLSX (STUB) ───

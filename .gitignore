@@ -14,6 +14,10 @@ gmail-credentials.json
 # Client data files — stay out of the repo
 well_Frio_Energy_Holdings_I*.csv
 ComboCurve_export_sample.xlsx
+# Operator sample files dropped at project root during Phase 1 parser development.
+# These are real client production numbers — must never be committed.
+*Aftermath*Dailies*.csv
+*_Aftermath_*.csv
 
 # Root-level package-lock (we use per-package locks in /api and /web)
 /package-lock.json
