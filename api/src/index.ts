@@ -15,6 +15,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
+import { startRetryWorkerCron } from './services/retryWorker.js';
 import exportsRouter from './routes/exports.js';
 import adminRouter from './routes/admin.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
@@ -105,6 +106,10 @@ app.listen(PORT, () => {
       process.env.GMAIL_REFRESH_TOKEN
     ) {
       startEmailPollerCron();
+      // Task #62: retry worker runs in-process alongside the poller.
+      // Offset schedule (:07/:22/:37/:52) keeps it out of the poller's
+      // quota window when both hit in the same 15-min tick.
+      startRetryWorkerCron();
     } else {
       console.warn(
         '[index] Gmail env vars not configured — email poller disabled. Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN to enable.'

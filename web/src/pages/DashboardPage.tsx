@@ -24,6 +24,14 @@ interface EmailLogRow {
   attachments_processed: number | null;
   status: string;
   error_messages: string[] | null;
+  // Task #62 retry columns. All nullable because the DB defaults
+  // take effect on insert, but older rows (pre-migration) will still
+  // surface here if anything cached them before the backfill.
+  retry_count: number | null;
+  max_retries: number | null;
+  is_retryable: boolean | null;
+  next_retry_at: string | null;
+  last_retry_outcome: string | null;
 }
 
 interface Stats {
@@ -55,6 +63,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // Nonce bumped when we need to re-fetch (e.g. after a Retry Now click).
+  const [reloadTick, setReloadTick] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -73,12 +84,16 @@ export default function DashboardPage() {
         ] = await Promise.all([
           supabase
             .from('email_log')
-            .select('id, sender, subject, received_at, attachments_found, attachments_processed, status, error_messages')
+            .select(
+              'id, sender, subject, received_at, attachments_found, attachments_processed, status, error_messages, retry_count, max_retries, is_retryable, next_retry_at, last_retry_outcome'
+            )
             .order('received_at', { ascending: false })
             .limit(20),
           supabase
             .from('email_log')
-            .select('id, sender, subject, received_at, attachments_found, attachments_processed, status, error_messages')
+            .select(
+              'id, sender, subject, received_at, attachments_found, attachments_processed, status, error_messages, retry_count, max_retries, is_retryable, next_retry_at, last_retry_outcome'
+            )
             .in('status', ['failed', 'partial'])
             .order('received_at', { ascending: false })
             .limit(10),
@@ -124,7 +139,9 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadTick]);
+
+  const handleRefresh = () => setReloadTick((n) => n + 1);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -155,7 +172,7 @@ export default function DashboardPage() {
         {loading ? (
           <SkeletonRow />
         ) : flagged.length === 0 ? null : (
-          <EmailLogTable rows={flagged} showErrors={true} />
+          <EmailLogTable rows={flagged} showErrors={true} onRetrySuccess={handleRefresh} />
         )}
       </Card>
 
@@ -173,7 +190,11 @@ export default function DashboardPage() {
 
       {/* Recent activity */}
       <Card title="Recent email processing activity" subtitle="Most recent 20 messages delivered to the production inbox.">
-        {loading ? <SkeletonRow /> : <EmailLogTable rows={recent} showErrors={false} />}
+        {loading ? (
+          <SkeletonRow />
+        ) : (
+          <EmailLogTable rows={recent} showErrors={false} onRetrySuccess={handleRefresh} />
+        )}
       </Card>
     </div>
   );
@@ -227,7 +248,15 @@ function StatCard({ label, value, loading }: { label: string; value: string; loa
   );
 }
 
-function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: boolean }) {
+function EmailLogTable({
+  rows,
+  showErrors,
+  onRetrySuccess,
+}: {
+  rows: EmailLogRow[];
+  showErrors: boolean;
+  onRetrySuccess?: () => void;
+}) {
   if (rows.length === 0) {
     return <div style={{ color: colors.darkGray, fontSize: '13px' }}>No entries yet.</div>;
   }
@@ -241,6 +270,7 @@ function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: 
             <th style={thStyle}>Subject</th>
             <th style={thStyle}>Attachments</th>
             <th style={thStyle}>Status</th>
+            <th style={thStyle}>Retry</th>
             {showErrors && <th style={thStyle}>Details</th>}
           </tr>
         </thead>
@@ -256,6 +286,9 @@ function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: 
               <td style={tdStyle}>
                 <StatusPill status={r.status} />
               </td>
+              <td style={tdStyle}>
+                <RetryCell row={r} onSuccess={onRetrySuccess} />
+              </td>
               {showErrors && (
                 <td style={{ ...tdStyle, color: colors.darkGray, fontSize: '12px', maxWidth: '360px' }}>
                   {(r.error_messages ?? []).slice(0, 2).map((m, i) => (
@@ -269,6 +302,153 @@ function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: 
       </table>
     </div>
   );
+}
+
+/**
+ * RetryCell — the "Attempt N/5" badge + "Retry Now" button.
+ *
+ * What you see depends on the row state:
+ *   • Never retried, clean status (completed/ignored)           → —
+ *   • Has been retried before                                   → "Attempt N/5" badge
+ *   • Status failed/partial AND retry_count < max_retries       → Retry Now button
+ *   • Status failed/partial AND retry_count >= max_retries      → "Exhausted" text
+ *   • is_retryable=true AND next_retry_at in future             → "Auto-retry at {time}"
+ *
+ * The button POSTs to /api/admin/retry-now with the row id,
+ * then calls onSuccess so the parent re-fetches the row state.
+ */
+function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [localErr, setLocalErr] = useState<string | null>(null);
+
+  const retryCount = row.retry_count ?? 0;
+  const maxRetries = row.max_retries ?? 5;
+  const canRetry =
+    (row.status === 'failed' || row.status === 'partial') &&
+    retryCount < maxRetries &&
+    row.last_retry_outcome !== 'permanent_failure';
+  const exhausted = retryCount >= maxRetries;
+  const scheduledIso = row.is_retryable ? row.next_retry_at : null;
+
+  async function handleClick() {
+    setBusy(true);
+    setLocalErr(null);
+    try {
+      const resp = await fetch('/api/admin/retry-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailLogId: row.id }),
+      });
+      const json = await resp.json();
+      if (!resp.ok || !json.ok) {
+        throw new Error(json.error || `HTTP ${resp.status}`);
+      }
+      onSuccess?.();
+    } catch (e) {
+      setLocalErr(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+    // If success: parent will re-fetch and this component will unmount/remount
+    // with fresh state, so no need to setBusy(false).
+  }
+
+  // Nothing interesting to show — keep the cell tidy.
+  if (retryCount === 0 && !canRetry && !scheduledIso) {
+    return <span style={{ color: colors.darkGray, fontSize: '12px' }}>—</span>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      {retryCount > 0 && (
+        <RetryBadge
+          count={retryCount}
+          max={maxRetries}
+          outcome={row.last_retry_outcome}
+          exhausted={exhausted}
+        />
+      )}
+      {canRetry && (
+        <button
+          onClick={handleClick}
+          disabled={busy}
+          style={retryButtonStyle(busy)}
+          title="Retry this email now, bypassing the automatic backoff"
+        >
+          {busy ? 'Retrying…' : 'Retry Now'}
+        </button>
+      )}
+      {!canRetry && scheduledIso && (
+        <span style={{ fontSize: '11px', color: colors.darkGray }}>
+          Auto-retry {formatRelativeFuture(scheduledIso)}
+        </span>
+      )}
+      {exhausted && !canRetry && (
+        <span style={{ fontSize: '11px', color: colors.danger }}>Retries exhausted</span>
+      )}
+      {localErr && (
+        <span style={{ fontSize: '11px', color: colors.danger, maxWidth: 180 }}>
+          {truncate(localErr, 80)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RetryBadge({
+  count,
+  max,
+  outcome,
+  exhausted,
+}: {
+  count: number;
+  max: number;
+  outcome: string | null;
+  exhausted: boolean;
+}) {
+  const { bg, fg } = badgePalette(outcome, exhausted);
+  return (
+    <span
+      style={{
+        backgroundColor: bg,
+        color: fg,
+        padding: '2px 7px',
+        borderRadius: '9px',
+        fontSize: '11px',
+        fontWeight: 600,
+        display: 'inline-block',
+        width: 'fit-content',
+      }}
+      title={outcome ? `Last retry outcome: ${outcome}` : undefined}
+    >
+      Attempt {count}/{max}
+    </span>
+  );
+}
+
+function badgePalette(
+  outcome: string | null,
+  exhausted: boolean
+): { bg: string; fg: string } {
+  if (exhausted) return { bg: `${colors.danger}22`, fg: colors.danger };
+  if (outcome === 'success') return { bg: `${colors.success}22`, fg: colors.success };
+  if (outcome === 'permanent_failure') return { bg: `${colors.danger}22`, fg: colors.danger };
+  if (outcome === 'transient_failure') return { bg: `${colors.warning}22`, fg: colors.warning };
+  return { bg: `${colors.info}22`, fg: colors.info };
+}
+
+function retryButtonStyle(busy: boolean): React.CSSProperties {
+  return {
+    backgroundColor: busy ? colors.mediumGray : colors.electricTeal,
+    color: busy ? colors.darkGray : colors.white,
+    border: 'none',
+    borderRadius: '4px',
+    padding: '4px 10px',
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: busy ? 'wait' : 'pointer',
+    width: 'fit-content',
+    letterSpacing: '0.3px',
+  };
 }
 
 function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
@@ -391,6 +571,27 @@ function formatRelative(iso: string | null): string {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+/**
+ * Relative-time formatter oriented toward the future ("in 12 min", "in 2 hr").
+ * Used for the "Auto-retry at …" hint on rows that are queued for a
+ * future retry attempt. Falls back to an absolute date if > 14 days out.
+ */
+function formatRelativeFuture(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const diffMs = d.getTime() - Date.now();
+  if (diffMs <= 0) return 'momentarily';
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return 'momentarily';
+  if (mins < 60) return `in ${mins} min`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `in ${hrs} hr${hrs === 1 ? '' : 's'}`;
+  const days = Math.round(hrs / 24);
+  if (days < 14) return `in ${days} day${days === 1 ? '' : 's'}`;
+  return 'on ' + d.toLocaleDateString();
 }
 
 /* ──────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import {
 import { supabase } from './supabase.js';
 import { dispatchParser, ParserOutcome } from '../parsers/index.js';
 import { storeMonthlyRecords, storeDailyRecords } from './productionStorage.js';
+import { computeRetryState, DEFAULT_MAX_RETRIES } from './errorClassification.js';
 
 const STORAGE_BUCKET = 'production-files';
 
@@ -96,6 +97,38 @@ async function finalizeEmailLog(
   attachmentsProcessed: number,
   errors: string[]
 ): Promise<void> {
+  // Read current retry bookkeeping so we can compute the next state.
+  // Task #62 (2026-04-21): finalize now also sets the retry columns —
+  // is_retryable / next_retry_at / last_retry_outcome — based on whether
+  // this run produced a transient error and how many attempts we've had.
+  // See services/errorClassification.ts for the rules.
+  let retryCountSoFar = 0;
+  let maxRetries = DEFAULT_MAX_RETRIES;
+  try {
+    const { data, error } = await supabase
+      .from('email_log')
+      .select('retry_count, max_retries')
+      .eq('id', emailLogId)
+      .single();
+    if (error) {
+      console.warn(
+        `[emailPoller] Failed to read retry bookkeeping for email ${emailLogId}: ${error.message}. ` +
+          'Using defaults.'
+      );
+    } else if (data) {
+      retryCountSoFar = data.retry_count ?? 0;
+      maxRetries = data.max_retries ?? DEFAULT_MAX_RETRIES;
+    }
+  } catch (err) {
+    console.warn(
+      `[emailPoller] Unexpected error reading retry state for email ${emailLogId}: ${
+        (err as Error).message
+      }. Using defaults.`
+    );
+  }
+
+  const retryState = computeRetryState(status, errors, retryCountSoFar, maxRetries);
+
   await supabase
     .from('email_log')
     .update({
@@ -103,6 +136,12 @@ async function finalizeEmailLog(
       attachments_processed: attachmentsProcessed,
       error_messages: errors.length > 0 ? errors : null,
       processing_completed_at: new Date().toISOString(),
+      is_retryable: retryState.is_retryable,
+      next_retry_at: retryState.next_retry_at,
+      last_retry_outcome: retryState.last_retry_outcome,
+      // Note: retry_count is NOT written here — the retry worker owns that
+      // counter. It increments atomically when claiming a retry slot (see
+      // retryWorker.ts). This way finalize never races with the worker.
     })
     .eq('id', emailLogId);
 }

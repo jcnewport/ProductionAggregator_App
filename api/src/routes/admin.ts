@@ -52,6 +52,7 @@
 import { Router, type Request, type Response } from 'express';
 import { supabase } from '../services/supabase.js';
 import { processMessage } from '../services/emailPoller.js';
+import { runRetryNow, runRetryPass, listDueRetries } from '../services/retryWorker.js';
 
 const router = Router();
 
@@ -299,6 +300,138 @@ router.post('/reprocess-failed', async (req: Request, res: Response) => {
     stillBroken: summary.length - recoveredCount,
     summary,
   });
+});
+
+/* ────────────────────────────────────────────────────────────────
+ * POST /api/admin/retry-now
+ *
+ * Task #62 — manual retry trigger. The dashboard's "Retry Now"
+ * button POSTs here with { emailLogId } to re-run a single email
+ * immediately, bypassing the next_retry_at cooldown window.
+ *
+ * Respects retry_count < max_retries (can't override the budget),
+ * and atomically claims the retry slot the same way the cron does,
+ * so a user clicking the button at :06:59 doesn't collide with the
+ * :07 cron.
+ *
+ * On success returns the updated email_log row + the new attempt
+ * count, so the UI can immediately reflect what changed.
+ * ──────────────────────────────────────────────────────────────── */
+router.post('/retry-now', async (req: Request, res: Response) => {
+  const { emailLogId } = req.body || {};
+  if (!emailLogId || typeof emailLogId !== 'string') {
+    return res.status(400).json({
+      ok: false,
+      error: 'Missing "emailLogId" in request body.',
+    });
+  }
+
+  // Capture "before" state so the UI can show a diff if it wants.
+  const { data: beforeRow } = await supabase
+    .from('email_log')
+    .select(
+      'id, gmail_message_id, status, retry_count, max_retries, is_retryable, last_retry_outcome, next_retry_at'
+    )
+    .eq('id', emailLogId)
+    .single();
+
+  try {
+    const result = await runRetryNow(emailLogId);
+
+    // Fetch the post-retry state by email_log id (not gmail id — that
+    // way the UI's row-level update doesn't depend on the gmail lookup).
+    const { data: afterRow } = await supabase
+      .from('email_log')
+      .select(
+        'id, gmail_message_id, sender, subject, received_at, status, ' +
+          'attachments_found, attachments_processed, error_messages, ' +
+          'processing_started_at, processing_completed_at, ' +
+          'retry_count, max_retries, is_retryable, last_retry_outcome, ' +
+          'next_retry_at, last_retry_at'
+      )
+      .eq('id', emailLogId)
+      .single();
+
+    return res.json({
+      ok: true,
+      attempted: result.attempted,
+      maxRetries: result.maxRetries,
+      before: beforeRow
+        ? {
+            status: beforeRow.status,
+            retryCount: beforeRow.retry_count,
+            lastOutcome: beforeRow.last_retry_outcome,
+          }
+        : null,
+      after: afterRow,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // 400 because the typical "error" here is "exhausted retries" or
+    // "missing gmail_message_id" — caller-side data problems, not 5xx.
+    return res.status(400).json({
+      ok: false,
+      error: msg,
+      emailLogId,
+    });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────
+ * POST /api/admin/retry-pass
+ *
+ * Task #62 — operator hook to kick the retry worker on demand.
+ * Same as what the 15-minute cron does, but we can call it during
+ * debugging or after a deploy that fixed a transient-error cause.
+ *
+ * Body: { max?: number }  // default 10, hard cap 50
+ * ──────────────────────────────────────────────────────────────── */
+router.post('/retry-pass', async (req: Request, res: Response) => {
+  const raw = req.body?.max;
+  let max = 10;
+  if (raw !== undefined) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      return res
+        .status(400)
+        .json({ ok: false, error: `Invalid max "${raw}" — must be a positive integer.` });
+    }
+    max = Math.min(Math.floor(n), 50);
+  }
+  try {
+    const result = await runRetryPass(max);
+    return res.json({ ok: true, max, ...result });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ ok: false, error: `runRetryPass threw: ${msg}` });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────
+ * GET /api/admin/retries-due
+ *
+ * Task #62 — read-only peek at the retry queue. Useful for
+ * "why hasn't this retried yet?" debugging.
+ * ──────────────────────────────────────────────────────────────── */
+router.get('/retries-due', async (req: Request, res: Response) => {
+  const raw = req.query.limit;
+  let limit = 50;
+  if (raw !== undefined) {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) {
+      return res
+        .status(400)
+        .json({ ok: false, error: `Invalid limit "${raw}" — must be a positive integer.` });
+    }
+    limit = Math.min(Math.floor(n), 200);
+  }
+  try {
+    const rows = await listDueRetries(limit);
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ ok: false, error: `listDueRetries threw: ${msg}` });
+  }
 });
 
 export default router;
