@@ -25,6 +25,7 @@ import { btaDailyPerWellXlsxAdapter } from './btaDailyPerWellXlsx.js';
 import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
 import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
 import { pdsXtoMonthlyAdapter } from './pdsXtoMonthly.js';
+import { pdsConocoPhillipsDailyAdapter } from './pdsConocoPhillipsDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -137,23 +138,26 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Positional x/y extraction (pagerender override). 15 columns. Cumulative OilCum/GasCum preserved in extraFields — NOT mapped to volumes. GasInj, Pressure Base, Producing Status, Well Status all in extraFields. "Well Num" column holds 10-digit API → padded with "0000" to derive API14. 6-pt row bucket.',
   },
 
-  // ─── Format 5 — PDS ConocoPhillips Daily (STUB) ───
+  // ─── Format 5 — PDS ConocoPhillips Daily (IMPLEMENTED) ───
+  //
+  // Positional (x/y) extraction via pagerender override, same pattern as
+  // EOG/XTO Monthly. 13 columns: Well ID | Well Name | Completion No | API |
+  // Prod Date | Oil Prod | Oil Sales | Gas Prod | Gas Sales | Water Prod |
+  // Tubing Pres. | Casing Pres. | BHP. Header labels are stacked across
+  // 5 y-lines in this format (e.g. "Oil" above "Prod") so instead of
+  // rebuilding split labels programmatically we use a **hardcoded
+  // column-center plan** (runtime-verified by a header-fingerprint check:
+  // the PDF must contain "Well ID", "Well Name", "Completion No", "API",
+  // "Prod Date", and "BHP" or parse fails loudly). 12-digit API → api10
+  // first 10 digits, api14 padded with trailing "00". Oil Sales is
+  // typically blank in samples → stored as null. BHP kept in
+  // extraFields.bhp (not in ComboCurve template).
   {
-    adapter: stubAdapter({
-      name: 'PDS ConocoPhillips Daily',
-      operatorName: 'ConocoPhillips (Concho)',
-      dataType: 'daily',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@conocophillips\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
-        /CONCHO|CONOCO/i.test(ctx.pdfText),
-    }),
+    adapter: pdsConocoPhillipsDailyAdapter,
     sampleFile: 'PDSWDX-DP-conocophillips-DAILY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Has pressure data (Tubing, Casing, BHP). API is 12-digit. Oil Sales column appears blank in samples. BHP stored as extra metadata.',
+      'Positional x/y extraction. 13 columns. Hardcoded column-center plan verified at runtime by header-fingerprint check. 12-digit API normalized: api10 = first 10 digits, api14 = pad with "00" to 14. Oil Sales typically blank → null (not 0). BHP in extraFields. 8-pt row bucket (merges the 2-pt-split BHP sub-row without colliding adjacent data rows at 18-pt spacing). Daily date preserved as YYYY-MM-DD.',
   },
 
   // ─── Format 5a — PDS Anadarko Daily (STUB) ───
