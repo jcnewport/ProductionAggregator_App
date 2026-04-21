@@ -27,6 +27,7 @@ import { supabase } from './supabase.js';
 import { dispatchParser, ParserOutcome } from '../parsers/index.js';
 import { storeMonthlyRecords, storeDailyRecords } from './productionStorage.js';
 import { computeRetryState, DEFAULT_MAX_RETRIES } from './errorClassification.js';
+import { maybeSendFailureAlert } from './notifications.js';
 
 const STORAGE_BUCKET = 'production-files';
 
@@ -144,6 +145,31 @@ async function finalizeEmailLog(
       // retryWorker.ts). This way finalize never races with the worker.
     })
     .eq('id', emailLogId);
+
+  // Task #63 (2026-04-21). Fire a notification email IFF this run ended
+  // in a terminal failure state. maybeSendFailureAlert is self-gating:
+  //   • returns early if NOTIFICATIONS_ENABLED != "true"
+  //   • returns early if outcome != permanent_failure/exhausted
+  //   • returns early if alert_sent_at is already set (dedupe)
+  //   • swallows every error so a notification hiccup can never poison
+  //     the parent processMessage run
+  // We do NOT await the function's failure — fire-and-log is enough.
+  if (
+    retryState.last_retry_outcome === 'permanent_failure' ||
+    retryState.last_retry_outcome === 'exhausted'
+  ) {
+    try {
+      await maybeSendFailureAlert(emailLogId);
+    } catch (err) {
+      // Defense-in-depth: maybeSendFailureAlert catches its own errors,
+      // but if somehow one escapes we log rather than propagate.
+      console.error(
+        `[emailPoller] Notification pathway threw for ${emailLogId}: ${
+          (err as Error).message
+        }`
+      );
+    }
+  }
 }
 
 /**

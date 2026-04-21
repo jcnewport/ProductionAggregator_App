@@ -53,6 +53,7 @@ import { Router, type Request, type Response } from 'express';
 import { supabase } from '../services/supabase.js';
 import { processMessage } from '../services/emailPoller.js';
 import { runRetryNow, runRetryPass, listDueRetries } from '../services/retryWorker.js';
+import { maybeSendFailureAlert, resendFailureAlert } from '../services/notifications.js';
 
 const router = Router();
 
@@ -431,6 +432,38 @@ router.get('/retries-due', async (req: Request, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return res.status(500).json({ ok: false, error: `listDueRetries threw: ${msg}` });
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────
+ * POST /api/admin/send-alert
+ *
+ * Task #63 — manual trigger for a failure-alert email.
+ * Same idempotency as the automatic path: no-op if the row isn't in
+ * a terminal failure state, or if alert_sent_at is already set.
+ *
+ * Body: { emailLogId: string, force?: boolean }
+ *   force=true  → clear alert_sent_at first (re-send a prior alert)
+ *
+ * Returns the notification module's { sent, reason, gmailMessageId? }.
+ * ──────────────────────────────────────────────────────────────── */
+router.post('/send-alert', async (req: Request, res: Response) => {
+  const { emailLogId, force } = req.body || {};
+  if (!emailLogId || typeof emailLogId !== 'string') {
+    return res.status(400).json({
+      ok: false,
+      error: 'Missing "emailLogId" in request body.',
+    });
+  }
+  try {
+    const result = force
+      ? await resendFailureAlert(emailLogId)
+      : await maybeSendFailureAlert(emailLogId);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // maybeSendFailureAlert catches internally but be defensive.
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ ok: false, error: msg });
   }
 });
 
