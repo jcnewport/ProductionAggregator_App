@@ -30,6 +30,7 @@ import { pdsAnadarkoDailyAdapter } from './pdsAnadarkoDaily.js';
 import { pdsEogDailyAdapter } from './pdsEogDaily.js';
 import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
 import { pdsMewbourneDailyAdapter } from './pdsMewbourneDaily.js';
+import { pdsMewbourneMonthlyAdapter } from './pdsMewbourneMonthly.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -102,23 +103,42 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Positional x/y extraction (pagerender override). 11 columns: Well Name | Well ID | API | Prod Date | DaysOn | Oil Prod | Oil Sales | Gas Prod | Gas Sales | Water Prod | Water Inj. Monthly end-of-month dates normalized to first-of-month; raw date preserved. Negative Oil Prod (BS&W corrections) preserved. Distinguishing signatures vs Anadarko: "Water Inj" (no t) and "DaysOn" (no space).',
   },
 
-  // ─── Format 3 — PDS Mewbourne Monthly (STUB) ───
+  // ─── Format 3 — PDS Mewbourne Monthly (IMPLEMENTED) ───
+  //
+  // Monthly variant of Mewbourne Daily (5c). Same positional +
+  // header-discovery pattern as XTO Monthly. 14 mapped columns:
+  //   Well Num (8-digit) | Well Name | API (10-digit) | Compl.ID |
+  //   Prod Date | BTU | Oil Begin | Oil Prod | OilSales | Oil End |
+  //   Gas Prod | GasSales | Water Prod | DaysOn
+  //
+  // IMPORTANT — correction to the project spec:
+  //   The spec note ("API is 8-digit — needs padding/lookup") confused
+  //   two separate columns. The ACTUAL Mewbourne PDF has BOTH a 8-digit
+  //   "Well Num" (Mewbourne's internal ID, goes to operatorWellId) AND
+  //   a distinct 10-digit "API" column (the real state API, padded to
+  //   api14 with trailing "0000"). Same pattern as Mewbourne Daily.
+  //
+  // Tank-gauge handling (critical):
+  //   - Oil Begin / Oil End are INVENTORY READINGS, not production.
+  //     They are captured in extraFields.oilBegin / .oilEnd for audit
+  //     but NEVER reach Oil Prod / OilSales.
+  //   - BTU (gas quality) and Compl.ID preserved in extraFields.
+  //   - DaysOn IS in the ProductionRecord schema → populated directly.
+  //
+  // Row grouping: sequential-proximity clustering (4 pt) — same pattern
+  // as XTO Daily and Mewbourne Daily. Handles the 2-pt well-identity
+  // sub-row split while keeping 10+-pt-apart adjacent rows AND the
+  // "(H3OG)" continuation lines in separate clusters.
+  //
+  // Detect: "Mewbourne" + "Monthly Production Estimates" + (tank-gauge
+  // labels "Oil Begin"+"Oil End" OR the Mewbourne-unique footnote
+  // "Gas at State Pressure Base"), excludes all other PDS operators.
   {
-    adapter: stubAdapter({
-      name: 'PDS Mewbourne Monthly',
-      operatorName: 'Mewbourne Oil Company',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@mewbourne\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Monthly Production Estimates', 'PDS Well Data Exchange') &&
-        /MEWBOURNE/i.test(ctx.pdfText),
-    }),
+    adapter: pdsMewbourneMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-mewbourne-MONTHLY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'HIGH complexity. Extra columns (BTU, Oil Begin/End, Compl.ID). API is 8-digit — needs padding/lookup. Oil Begin/End are tank gauge, do NOT map to Oil Prod/Sales.',
+      'Positional x/y extraction + header-row discovery. 14 mapped columns. 8-digit "Well Num" → operatorWellId; separate 10-digit "API" → api10/api14 (pad with "0000"). Oil Begin/Oil End are tank-gauge inventory → extraFields, NOT production. BTU + Compl.ID → extraFields. DaysOn → daysOn field. Monthly date normalized to first-of-month; raw preserved. Sequential-proximity row clustering (4 pt).',
   },
 
   // ─── Format 4 — PDS XTO Monthly (IMPLEMENTED) ───
