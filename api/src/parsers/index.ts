@@ -25,12 +25,15 @@ import * as XLSX from 'xlsx';
 import type { EmailAttachment } from '../services/gmail.js';
 import type {
   FileKind,
+  FormatAdapter,
   ParserContext,
   ProductionRecord,
 } from './types.js';
 import { FORMAT_REGISTRY } from './registry.js';
 import { NON_PRODUCTION_FILTERS } from './nonProductionFilters.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
+import { getActiveMappings, shouldLogLoaderFailure } from './dataDriven/loader.js';
+import { buildAdapterFromMapping } from './dataDriven/adapter.js';
 
 // Re-export so callers (services/productionStorage.ts) can keep their import.
 export type { ProductionRecord } from './types.js';
@@ -223,10 +226,33 @@ export async function dispatchParser(
     };
   }
 
-  // Walk the registry in order; first adapter that accepts the file kind AND
-  // signals detect() wins.
-  for (const registered of FORMAT_REGISTRY) {
-    const adapter = registered.adapter;
+  // Build the full ordered adapter list: static hand-written parsers FIRST
+  // (they're battle-tested for all the known quirks in each operator's file),
+  // then dynamic data-driven mappings loaded from format_mappings. This
+  // ordering is deliberate: per the "Leave existing parsers alone" migration
+  // strategy (Task #79 scoping), hand-coded adapters always win over DB
+  // mappings for the same operator. A DB mapping only gets a chance when no
+  // static adapter claims the file.
+  const staticAdapters: FormatAdapter[] = FORMAT_REGISTRY.map((r) => r.adapter);
+  let dynamicAdapters: FormatAdapter[] = [];
+  try {
+    const mappings = await getActiveMappings();
+    dynamicAdapters = mappings.map(buildAdapterFromMapping);
+  } catch (err) {
+    // Loader failure is non-fatal — we just skip dynamic adapters for this
+    // dispatch cycle and let static registry handle it. Only log ONCE per
+    // process lifetime to avoid spamming when Supabase env vars are missing
+    // (e.g. offline test runs).
+    if (shouldLogLoaderFailure()) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[dispatcher] dynamic-mapping loader disabled this session (proceeding with static registry only): ${msg}`);
+    }
+  }
+  const orderedAdapters: FormatAdapter[] = [...staticAdapters, ...dynamicAdapters];
+
+  // Walk the combined list in order; first adapter that accepts the file kind
+  // AND signals detect() wins.
+  for (const adapter of orderedAdapters) {
     if (!adapter.fileKinds.includes(ctx.fileKind)) continue;
 
     let matched = false;
