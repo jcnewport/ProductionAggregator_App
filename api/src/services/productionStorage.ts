@@ -149,6 +149,59 @@ async function upsertWell(
 }
 
 /**
+ * Dedupe rows by (well_id, prod_date) before sending to Supabase.
+ *
+ * Why this is needed:
+ *   Postgres rejects an INSERT ... ON CONFLICT statement when the same
+ *   conflict key appears twice in a single INSERT batch with the error
+ *   "ON CONFLICT DO UPDATE command cannot affect row a second time".
+ *   This would otherwise take down an entire email's import just because
+ *   the source workbook had two rows for the same well on the same date
+ *   (which happens legitimately — it's usually a correction, sometimes
+ *   a parser quirk like reading a merged cell twice).
+ *
+ * Semantics:
+ *   LAST record wins. This matches O&G accounting convention: when a
+ *   workbook has the same well+date appearing twice, the second row is
+ *   almost always an adjustment/correction meant to supersede the first.
+ *   Same outcome you'd get if you ran two upserts sequentially.
+ *
+ * Observability:
+ *   We log each dedupe event with the source filename + count so it
+ *   shows up in Railway logs. If a file is producing HUNDREDS of dupes
+ *   that's usually a parser bug and worth investigating; a handful of
+ *   dupes per file is normal for many operator formats.
+ */
+interface WithConflictKey {
+  well_id: string;
+  prod_date: string;
+  [k: string]: unknown;
+}
+
+function dedupeByWellDate<T extends WithConflictKey>(
+  rows: T[],
+  context: StorageContext,
+  granularity: 'monthly' | 'daily'
+): T[] {
+  if (rows.length <= 1) return rows;
+  const byKey = new Map<string, T>();
+  let duplicates = 0;
+  for (const row of rows) {
+    const key = `${row.well_id}|${row.prod_date}`;
+    if (byKey.has(key)) duplicates++;
+    byKey.set(key, row); // last wins
+  }
+  if (duplicates > 0) {
+    console.warn(
+      `[productionStorage] Deduped ${duplicates} duplicate (well_id, prod_date) ${granularity} ` +
+        `rows from "${context.sourceFileName}". ${rows.length} → ${byKey.size}. ` +
+        `Last-row-wins. If this count is high, check the parser for row-emission bugs.`
+    );
+  }
+  return Array.from(byKey.values());
+}
+
+/**
  * Convert a ProductionRecord into the DB row shape.
  */
 function toRowShape(
@@ -208,7 +261,11 @@ export async function storeMonthlyRecords(
   }
 
   // Build rows
-  const rows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+  const rawRows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+
+  // Dedupe by (well_id, prod_date) BEFORE upsert — Postgres rejects an ON CONFLICT
+  // batch that targets the same row twice. Last-row-wins matches O&G correction semantics.
+  const rows = dedupeByWellDate(rawRows, context, 'monthly');
 
   // Chunked upsert — Supabase default row limit per request is ~1000; keep us safely below
   const CHUNK = 500;
@@ -245,7 +302,11 @@ export async function storeDailyRecords(
     apiToWellId.set(rec.api10, wellId);
   }
 
-  const rows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+  const rawRows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+
+  // Same dedupe rationale as storeMonthlyRecords — prevents ON CONFLICT crashes
+  // when the source file has multiple rows for the same (well, day).
+  const rows = dedupeByWellDate(rawRows, context, 'daily');
 
   const CHUNK = 500;
   let inserted = 0;
