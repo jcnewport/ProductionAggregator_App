@@ -49,29 +49,45 @@ async function upsertOperator(operatorName: string): Promise<string> {
 }
 
 /**
- * Look up the ComboCurve Well ID (chosen_id) for a given API10 in the
- * combocurve_wells catalog. Returns null if the well isn't in the catalog
- * yet — that's fine, we'll just leave combocurve_well_id null and a future
- * catalog refresh + backfill can close the gap.
+ * Resolve the ComboCurve Well ID (Chosen ID) for a given API10.
  *
- * Why we do this every insert instead of relying on the parser: most
- * operator reports don't include the ComboCurve Well ID at all (it's
- * an internal identifier). Centralizing the lookup here means EVERY
- * parser benefits without each one needing its own join logic.
+ * Per Kyle Parker (client, 2026-04-20):
+ *   "Our Chosen ID is API10. The Chosen ID maps all data into CC, making
+ *    it the critical number here."
+ *
+ * So the rule is simple: Chosen ID = API10 as bigint. We still query the
+ * combocurve_wells catalog first — if the well is cataloged, the catalog
+ * is authoritative (it's what Kyle actually exported from CC). But if the
+ * well isn't in the catalog, we fall back to api10::bigint, which matches
+ * Kyle's rule and guarantees the export's "Well ID" column is never blank.
+ *
+ * Before this change (bug fixed 2026-04-21):
+ *   We returned null on a catalog miss, which caused 30 of 105 wells to
+ *   export with blank Well ID even though their API10 was known. The
+ *   catalog only had 75 wells — every new well went to null until Kyle
+ *   re-exported the catalog.
  */
-async function lookupCombocurveWellId(api10: string): Promise<number | null> {
+async function resolveCombocurveWellId(api10: string): Promise<number | null> {
+  // 1. Catalog lookup — authoritative when present.
   const { data, error } = await supabase
     .from('combocurve_wells')
     .select('chosen_id')
     .eq('api10', api10)
     .maybeSingle();
   if (error) {
-    // Log but don't throw — a missing catalog match is an enrichment gap,
-    // not a blocker. The well row will still get created with null id.
-    console.warn(`[productionStorage] combocurve_wells lookup for api10=${api10} failed: ${error.message}`);
-    return null;
+    console.warn(
+      `[productionStorage] combocurve_wells lookup for api10=${api10} failed: ${error.message}. ` +
+        `Falling back to api10::bigint per Kyle's Chosen ID = API10 rule.`
+    );
+  } else if (data?.chosen_id !== null && data?.chosen_id !== undefined) {
+    return data.chosen_id;
   }
-  return data?.chosen_id ?? null;
+
+  // 2. Fallback — api10 cast to Number. Safe because isValidApi10 rejects
+  //    any API10 starting with "00" (the only way bigint casting would
+  //    lose digits), so every valid API10 round-trips through Number().
+  const n = Number(api10);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /**
@@ -109,10 +125,12 @@ async function upsertWell(
           { onConflict: 'alias', ignoreDuplicates: true }
         );
     }
-    // Backfill combocurve_well_id opportunistically — if this well was created
-    // before the catalog had it, but the catalog has it now, close the gap.
+    // Backfill combocurve_well_id opportunistically. With the new resolver
+    // this should almost never hit (every valid api10 yields a non-null
+    // fallback), but the guard is cheap and future-proofs against any
+    // legacy rows that predated the resolver change.
     if (existing.combocurve_well_id === null || existing.combocurve_well_id === undefined) {
-      const ccId = await lookupCombocurveWellId(record.api10);
+      const ccId = await resolveCombocurveWellId(record.api10);
       if (ccId !== null) {
         const { error } = await supabase
           .from('wells')
@@ -131,7 +149,7 @@ async function upsertWell(
   // New well — enrich with the catalog lookup BEFORE the insert so the
   // ID lands on row creation (saves a round-trip and avoids a transient
   // null state that a concurrent export could pick up).
-  const combocurveWellId = await lookupCombocurveWellId(record.api10);
+  const combocurveWellId = await resolveCombocurveWellId(record.api10);
 
   const { data, error } = await supabase
     .from('wells')

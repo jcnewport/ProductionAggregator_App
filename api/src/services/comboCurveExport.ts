@@ -194,10 +194,21 @@ export function toRowCells(row: ProductionQueryRow): (string | number | null)[] 
 
   // Prefer the wells.* values when available (authoritative; aligns with CC mapping).
   // Fall back to the production_monthly row's own columns if the join didn't resolve.
-  const wellId = wellsJoin?.combocurve_well_id ?? null;
   const wellName = wellsJoin?.well_name ?? row.well_name ?? '';
   const api14 = wellsJoin?.api14 ?? row.api14 ?? '';
   const api10 = wellsJoin?.api10 ?? row.api10 ?? '';
+
+  // Well ID = Chosen ID per Kyle Parker's 2026-04-20 rule: "Chosen ID is API10".
+  // Prefer the catalog-sourced combocurve_well_id (set on insert and backfilled);
+  // fall back to Number(api10) so no row ever exports with a blank Well ID —
+  // previously 30/105 wells had null combocurve_well_id because the catalog
+  // only covered 75 wells. This fallback closes that gap without changing
+  // the value ever produced for the catalog-covered wells (chosen_id == api10
+  // across all 75 catalog rows — verified 2026-04-21).
+  const api10AsBigint = api10 ? Number(api10) : NaN;
+  const wellId =
+    wellsJoin?.combocurve_well_id ??
+    (Number.isFinite(api10AsBigint) && api10AsBigint > 0 ? api10AsBigint : null);
 
   return [
     wellId,                        // 1  Well ID (number or null)
