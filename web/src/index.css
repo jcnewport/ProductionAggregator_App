@@ -1,0 +1,258 @@
+/**
+ * Global CSS for the Stewardship.IS Production Aggregator web app.
+ *
+ * We use inline styles for ~95% of component styling, so this file is
+ * deliberately small — it only defines what inline styles can't express:
+ *
+ *   1. @keyframes — inline styles can reference keyframes but can't declare
+ *      them, so pulsing LIVE badges and card entrance animations live here.
+ *   2. Base typography and body reset, so every page starts from the same
+ *      canonical page background and font stack.
+ *   3. A handful of utility classes that components opt into by className
+ *      (e.g. .sis-hover-lift for the hover-lift card animation from the
+ *      chosen "Enterprise Confident + A's hover" UI direction).
+ */
+
+/* ───────────────── Base ───────────────── */
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #FAFBFC; /* matches colors.pageBg */
+  color: #212745;       /* matches colors.midnightNavy */
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Tabular numerics look much better on stat tiles, counters, and tables */
+.sis-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───────────────── Live / pulse ─────────────────
+ *
+ * Borrowed from Option B of the UI mockups. Used for:
+ *   - The LIVE badge in the header
+ *   - The "auto-refresh · live" indicator on the Recent Activity card
+ *
+ * The dot itself is a simple 7px teal circle; the glow comes from a
+ * box-shadow that animates outward and fades away. The animation runs
+ * forever on a 1.8s cycle — long enough to read as ambient, short enough
+ * to signal "this updates on its own."
+ */
+@keyframes sis-live-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(93, 206, 175, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(93, 206, 175, 0);
+  }
+}
+
+.sis-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5DCEAF; /* colors.electricTeal */
+  animation: sis-live-glow 1.8s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* ───────────────── Card hover lift ─────────────────
+ *
+ * Borrowed from Option A. Cards that opt into .sis-hover-lift get a gentle
+ * vertical translate and a slightly deeper shadow on hover, with the teal
+ * brand accent implied via a top-edge gradient bar that fades in.
+ *
+ * Keep the translate small (2-3px) — anything larger feels "cartoony" and
+ * clashes with the Enterprise Confident base direction.
+ */
+.sis-hover-lift {
+  transition: transform 0.25s cubic-bezier(.2,.9,.3,1.2),
+              box-shadow 0.25s cubic-bezier(.2,.9,.3,1.2),
+              border-color 0.25s cubic-bezier(.2,.9,.3,1.2);
+  position: relative;
+}
+
+.sis-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(33, 39, 69, 0.08), 0 2px 6px rgba(33, 39, 69, 0.04);
+}
+
+/* Teal accent line that lights up on hover — the "premium" cue from Option A.
+ * We implement it as a ::before with a linear gradient so it can fade in/out
+ * without pushing any layout around. */
+.sis-hover-lift::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  background: linear-gradient(90deg, #5DCEAF, rgba(93, 206, 175, 0));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.sis-hover-lift:hover::before {
+  opacity: 1;
+}
+
+/* ───────────────── Stagger rise-in ─────────────────
+ *
+ * Used on the dashboard when the page mounts — cards rise into place one
+ * after another instead of all flashing in at once. This is an opt-in
+ * animation: wrap the container in .sis-stagger and each direct child
+ * animates in sequence.
+ */
+@keyframes sis-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sis-stagger > * {
+  animation: sis-rise-in 0.45s ease both;
+}
+.sis-stagger > *:nth-child(1) { animation-delay: 0.00s; }
+.sis-stagger > *:nth-child(2) { animation-delay: 0.05s; }
+.sis-stagger > *:nth-child(3) { animation-delay: 0.10s; }
+.sis-stagger > *:nth-child(4) { animation-delay: 0.15s; }
+.sis-stagger > *:nth-child(5) { animation-delay: 0.20s; }
+.sis-stagger > *:nth-child(6) { animation-delay: 0.25s; }
+
+/* ───────────────── Form inputs ─────────────────
+ *
+ * We can't easily set a :focus style in inline styles, so form inputs that
+ * want a teal focus ring opt in with className="sis-input".
+ */
+.sis-input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #D4D8E1;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  background: #FFFFFF;
+  color: #212745;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+.sis-input:hover {
+  border-color: #B4BBC9;
+}
+.sis-input:focus {
+  border-color: #5DCEAF;
+  box-shadow: 0 0 0 3px rgba(93, 206, 175, 0.15);
+}
+
+/* ───────────────── Buttons ─────────────────
+ *
+ * Same pattern — opt in with className so :hover/:disabled work without
+ * JS-based mouse-tracking state.
+ */
+.sis-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s cubic-bezier(.2,.9,.3,1.2), box-shadow 0.18s ease, color 0.18s ease;
+}
+.sis-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sis-btn-primary {
+  background: #212745;
+  color: #FFFFFF;
+}
+.sis-btn-primary:hover:not(:disabled) {
+  background: #2A3155;
+  transform: translateY(-1px);
+}
+
+.sis-btn-secondary {
+  background: #FFFFFF;
+  color: #212745;
+  border-color: #D4D8E1;
+}
+.sis-btn-secondary:hover:not(:disabled) {
+  border-color: #212745;
+}
+
+.sis-btn-teal {
+  background: #5DCEAF;
+  color: #212745;
+}
+.sis-btn-teal:hover:not(:disabled) {
+  background: #4AE3B8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(93, 206, 175, 0.4);
+}
+
+.sis-btn-sm {
+  padding: 5px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+/* ───────────────── Nav pills ─────────────────
+ *
+ * The top nav in Layout.tsx renders as a row of pill-shaped links. Active
+ * state uses the surfaceMuted background + midnight-navy text.
+ */
+.sis-navlink {
+  text-decoration: none;
+  color: #5A6378; /* colors.textMuted */
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.sis-navlink:hover {
+  background: #F2F3F7; /* colors.surfaceMuted */
+  color: #212745;
+}
+.sis-navlink.active {
+  background: #F2F3F7;
+  color: #212745;
+  font-weight: 600;
+}
+
+/* ───────────────── Table rows ─────────────────
+ *
+ * Tables are still built with inline-styled <table> markup for now, but the
+ * hover-row effect reads much better via CSS so we can keep inline styles
+ * for color + typography and defer hover to this class.
+ */
+.sis-row {
+  transition: background 0.15s ease;
+}
+.sis-row:hover {
+  background: #FAFBFC; /* colors.pageBg — subtle "hot row" tint */
+}

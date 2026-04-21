@@ -32,7 +32,7 @@
  * operator report and the /reprocess-email path should be used instead.
  */
 
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import { supabase } from '../services/supabase.js';
 import {
@@ -232,12 +232,21 @@ router.post('/', async (req: Request, res: Response) => {
   // exists? The DB has no unique constraint on (operator_id, name) — we warn
   // rather than hard-block so the UI can nudge but still allow versioned
   // duplicates (e.g. "Anadarko Monthly v2" test) if the operator insists.
-  const { data: existing } = await supabase
+  //
+  // Null operator_id matters here: Postgres treats `col = NULL` as UNKNOWN, not
+  // TRUE, so we have to use `.is('operator_id', null)` to actually match the
+  // unassigned rows. Using `.eq('operator_id', '')` (the old behavior) silently
+  // returned no rows, so the warning never fired for operator-less mappings.
+  let existingQuery = supabase
     .from('format_mappings')
     .select('id, is_active, version')
     .eq('name', payload.name)
-    .eq('operator_id', payload.operator_id ?? '')
     .limit(1);
+  existingQuery =
+    payload.operator_id === null
+      ? existingQuery.is('operator_id', null)
+      : existingQuery.eq('operator_id', payload.operator_id);
+  const { data: existing } = await existingQuery;
 
   const { data, error } = await supabase
     .from('format_mappings')
@@ -500,6 +509,30 @@ router.get('/operators/list', async (_req: Request, res: Response) => {
     return res.status(500).json({ ok: false, error: `Query failed: ${error.message}` });
   }
   return res.json({ ok: true, count: data?.length ?? 0, operators: data ?? [] });
+});
+
+/* ════════════════════════════════════════════════════════════════════
+ * Router-level error handler
+ * ════════════════════════════════════════════════════════════════════
+ * Multer throws typed errors (MulterError) when an upload violates its
+ * limits — most notably LIMIT_FILE_SIZE when someone tries to drop a
+ * multi-hundred-MB workbook onto /test. Without this handler those
+ * propagate to Express's default 500 page. We convert them to clean
+ * 4xx JSON responses so the UI can show a friendly message.
+ * Anything we don't recognize falls through to Express's default.
+ * ════════════════════════════════════════════════════════════════════ */
+router.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        ok: false,
+        error:
+          'Uploaded file exceeds 25 MB. If this really is one operator\'s report, open it manually — at that size it\'s almost certainly a consolidated batch.',
+      });
+    }
+    return res.status(400).json({ ok: false, error: `Upload error: ${err.message}` });
+  }
+  return next(err);
 });
 
 export default router;

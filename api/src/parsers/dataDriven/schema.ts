@@ -290,9 +290,37 @@ export function validateMappingConfig(raw: unknown): MappingConfig {
   if (typeof cfg.schemaVersion !== 'number') {
     throw new Error('mapping_config.schemaVersion must be a number.');
   }
-  // We're permissive here — the engines below will throw more specific errors
-  // when a field they need is missing. The goal of this validator is to catch
-  // obvious corruption, not to enforce every nested type.
+
+  // ── Required top-level fields (catches the most common UI bugs) ───────
+  if (typeof cfg.fileKind !== 'string') {
+    throw new Error('mapping_config.fileKind is required (e.g. "csv", "xlsx").');
+  }
+  if (typeof cfg.dataType !== 'string') {
+    throw new Error('mapping_config.dataType is required (e.g. "monthly", "daily").');
+  }
+
+  // ── Structured-kind specific checks. The engine reads conventions.* and
+  //    columnMappings eagerly, so catching them here surfaces a helpful
+  //    message in the UI instead of a cryptic "Cannot read properties of
+  //    undefined" at /test time.
+  if (kind === 'structured') {
+    if (!cfg.columnMappings || typeof cfg.columnMappings !== 'object') {
+      throw new Error('structured mapping_config.columnMappings is required.');
+    }
+    if (!cfg.conventions || typeof cfg.conventions !== 'object') {
+      throw new Error('structured mapping_config.conventions is required (at minimum: dateFormat).');
+    }
+    const conv = cfg.conventions as Record<string, unknown>;
+    if (typeof conv.dateFormat !== 'string') {
+      throw new Error(
+        'structured mapping_config.conventions.dateFormat is required (one of: M/D/YYYY, MM/DD/YYYY, YYYY-MM-DD, D/M/YYYY, excel-serial, auto).'
+      );
+    }
+  }
+
+  // The engines will still throw deeper errors for nested type mismatches —
+  // the goal above is just to catch the top-level shape problems the UI can
+  // actually surface in a form.
   return cfg as unknown as MappingConfig;
 }
 
