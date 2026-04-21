@@ -20,6 +20,7 @@ import { startRetryWorkerCron } from './services/retryWorker.js';
 import exportsRouter from './routes/exports.js';
 import exportHistoryRouter from './routes/exportHistory.js';
 import adminRouter from './routes/admin.js';
+import mappingsRouter from './routes/mappings.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
 import {
   adminLimiter,
@@ -94,6 +95,24 @@ app.use('/api/export', exportsRouter);
 //   GET /api/exports/:id/download        — 302 redirect to signed URL
 app.use('/api/exports', exportHistoryRouter);
 
+// Mapping management (Task #82 — Phase 2 of Task #79).
+//   GET    /api/admin/mappings                list (filterable)
+//   GET    /api/admin/mappings/:id            single
+//   POST   /api/admin/mappings                create
+//   PUT    /api/admin/mappings/:id            update (bumps version)
+//   DELETE /api/admin/mappings/:id            soft-delete (is_active=false)
+//   POST   /api/admin/mappings/validate       structural JSON check only
+//   POST   /api/admin/mappings/test           multipart: dry-run config vs file
+//   GET    /api/admin/mappings/operators/list operator dropdown source
+//
+// IMPORTANT: this mount MUST come before `app.use('/api/admin', ...)` below.
+// Express matches in registration order and routes the first-prefix hit, so
+// putting the more-specific `/api/admin/mappings` first prevents the general
+// admin router from swallowing these calls. Both mounts share the same
+// adminLimiter + requireAuthMaybe() guard so auth + rate-limit behavior is
+// identical.
+app.use('/api/admin/mappings', adminLimiter, requireAuthMaybe(), mappingsRouter);
+
 // Admin operations — reprocess failed emails, retry passes, alert sends.
 //   POST /api/admin/reprocess-email     { emailLogId?, gmailMessageId? }
 //   POST /api/admin/reprocess-failed    { statuses?, limit? }
@@ -115,7 +134,7 @@ app.use('/api/flagged-records', flaggedRecordsRouter);
 
 // TODO: Mount additional route handlers
 // app.use('/api/emails', emailRoutes);
-// app.use('/api/mappings', mappingRoutes);
+// (mappings router is mounted under /api/admin/mappings above)
 
 // ─── Serve the React frontend in production ──────────────────────────────
 // When this file is compiled, it sits at /api/dist/index.js. The web app's
