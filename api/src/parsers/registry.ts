@@ -87,6 +87,116 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     notes: 'Near 1:1 with template. 3-line-per-record PDF text structure.',
   },
 
+  /* ────────────────────────────────────────────────────────────────
+   * Formats 1b / 1c / 1d — PDS Monthly STUBS for three new operators
+   * that first arrived from adavis@frioenergypartners.com on
+   * 2026-04-21. Dispatcher can IDENTIFY each (so flagged-review shows
+   * the proper operator name, not "unrecognized"), but parse() throws
+   * until we build positional x/y extractors backed by a real local
+   * sample PDF.
+   *
+   * Why stubs instead of flat-text parsers:
+   *   Each of these PDFs exhibits pdf-parse concatenation / column
+   *   reordering quirks (Matador's trailing decimals smush together,
+   *   Diamondback emits a hidden Well Num column, Diversified lacks
+   *   any pressure/choke data). Writing flat-text regex from a
+   *   1-row-per-operator snippet is high drift-risk — an operator
+   *   shuffling columns next month would silently miscode production
+   *   volumes. Stubs are the safe play until either:
+   *     (a) Task #79 Mapping Management UI is live (data-driven
+   *         format config), OR
+   *     (b) We download a real PDF locally to iterate positionally.
+   *
+   * Detection uses PDSWDX boilerplate + operator-unique strings from
+   * the widened 3000-char "First look" snippets captured 2026-04-21
+   * (see project_task_80 memory for email_log IDs). None of these
+   * share Anadarko's "Water Inject" / "Days On" header so there's no
+   * false-match risk against the Anadarko adapter above.
+   * ──────────────────────────────────────────────────────────────── */
+
+  // ─── Format 1b — PDS Diamondback Monthly (STUB) ───
+  {
+    adapter: stubAdapter({
+      name: 'PDS Diamondback Monthly',
+      operatorName: 'Diamondback Energy',
+      dataType: 'monthly',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@diamondbackenergy\.com$/i] as const,
+      // Diamondback-unique markers: the "production@diamondbackenergy.com"
+      // inquiry-contact line + the Diamondback-specific "SSI" header
+      // (a Diamondback-internal surrogate-key column that sits between
+      // Well Name and Oil Prod in their PDS feed). SSI header is unique
+      // among all PDS operators we've seen so far.
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(
+          ctx.pdfText,
+          /Monthly Production Estimates/i,
+          /PDS Well Data Exchange/i,
+          /production@diamondbackenergy\.com/i,
+        ),
+    }),
+    sampleFile: 'PDSWDX-MP-DIAMONDBACK-20260421-187003.pdf',
+    status: 'stub',
+    notes:
+      'Diamondback Energy via Frio/West Pecos PDS feed. First seen 2026-04-21. Widened snippet shows ~10–11 column layout: API | Prod Date | Gas Prod | Water Prod | Gas Sales | Well Name | (Well Num?) | SSI | Oil Prod | Oil Sales | Days On — with Well Num possibly split from Well Name in the positional stream. 10-digit API ("42329..."). Full parser deferred until Task #79 or local sample PDF available.',
+  },
+
+  // ─── Format 1c — PDS Matador Monthly (STUB) ───
+  {
+    adapter: stubAdapter({
+      name: 'PDS Matador Monthly',
+      operatorName: 'Matador Resources Company',
+      dataType: 'monthly',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@matadorresources\.com$/i] as const,
+      // Matador-unique markers: operator name + Dallas HQ address
+      // ("5400 LBJ Freeway Suite 1500 Dallas, TX 75240") + the
+      // Matador-specific "MMBTU" heat-content column which no other
+      // PDS operator we support reports.
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(
+          ctx.pdfText,
+          /Monthly Production Estimates/i,
+          /PDS Well Data Exchange/i,
+          /Matador Resources Company/i,
+        ),
+    }),
+    sampleFile: 'PDSWDX-MP-MATADOR-20260421-187005.pdf',
+    status: 'stub',
+    notes:
+      'Matador Resources via Frio PDS feed. First seen 2026-04-21. Column layout from widened snippet: Prod Date | Oil Prod | Oil Sales | Gas Prod | Gas Sales | Water Prod | Well ID | Well Name | API14 | MMBTU | Sales. Uses 14-digit API. Includes MMBTU (gas heat content) — unique to Matador in our registry. pdf-parse flat text concatenates trailing decimals without separators (same quirk BTA WIO had) — positional x/y extraction required. Deferred until Task #79.',
+  },
+
+  // ─── Format 1d — PDS Diversified Monthly (STUB) ───
+  {
+    adapter: stubAdapter({
+      name: 'PDS Diversified Monthly',
+      operatorName: 'Diversified Energy',
+      dataType: 'monthly',
+      fileKinds: ['pdf'] as const,
+      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@div\.energy$/i] as const,
+      // Diversified-unique markers: operator name + OKC HQ address
+      // ("100 East Main Street Oklahoma City, OK 73104") + the
+      // "Well Status" column (Producing / Temporarily Abandoned /
+      // Shut In), which XTO also has but XTO is already caught earlier.
+      // Combined with the PDSWDX boilerplate this is specific enough.
+      detect: (ctx) =>
+        !!ctx.pdfText &&
+        hasAll(
+          ctx.pdfText,
+          /Monthly Production Estimates/i,
+          /PDS Well Data Exchange/i,
+          /Diversified Energy/i,
+        ),
+    }),
+    sampleFile: 'PDSWDX-MP-DIVERSIFIED-20260421-187004.pdf',
+    status: 'stub',
+    notes:
+      'Diversified Energy via Frio PDS feed. First seen 2026-04-21. Column layout from widened snippet: API (hyphenated 14-digit like "30-025-42724-00-00") | Well ID | Oil Prod | Gas Prod | Prod Date | Oil Sales | Gas Sales | Water Prod | Well Name | Well Status. No pressure, choke, or downtime columns. Many wells marked "Temporarily Abandoned" with mixed zero/non-zero volumes — must preserve non-zero rows. Deferred until Task #79.',
+  },
+
   // ─── Format 2 — PDS EOG Monthly (IMPLEMENTED) ───
   //
   // Positional (x/y) extraction via the same pagerender-override pattern used
