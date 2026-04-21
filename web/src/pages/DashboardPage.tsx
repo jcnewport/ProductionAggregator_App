@@ -305,20 +305,34 @@ function EmailLogTable({
 }
 
 /**
- * RetryCell — the "Attempt N/5" badge + "Retry Now" button.
+ * RetryCell — the "Attempt N/5" badge + "Retry Now" button + "Reprocess" button.
  *
  * What you see depends on the row state:
  *   • Never retried, clean status (completed/ignored)           → —
  *   • Has been retried before                                   → "Attempt N/5" badge
- *   • Status failed/partial AND retry_count < max_retries       → Retry Now button
+ *   • Status failed/partial AND retry_count < max_retries AND
+ *     last outcome wasn't "permanent_failure"                    → "Retry Now" button
  *   • Status failed/partial AND retry_count >= max_retries      → "Exhausted" text
  *   • is_retryable=true AND next_retry_at in future             → "Auto-retry at {time}"
+ *   • Status failed/partial (ANY reason, incl. terminal)         → "↻ Reprocess" button
  *
- * The button POSTs to /api/admin/retry-now with the row id,
- * then calls onSuccess so the parent re-fetches the row state.
+ * The two buttons exist for different situations:
+ *   • "Retry Now" — short-circuits the auto-retry backoff for a transient
+ *     error (e.g. Gmail API glitch). Honors the retry counter; refuses to fire
+ *     on rows already classified as permanent_failure.
+ *   • "Reprocess" — force re-fetches the attachment and runs it through the
+ *     current dispatcher again, regardless of classification. Useful AFTER
+ *     shipping new parser support for a previously-unrecognized format, so the
+ *     old "failed" rows can be brought back to life without opening a SQL client.
+ *
+ * Retry Now  → POST /api/admin/retry-now
+ * Reprocess  → POST /api/admin/reprocess-email
+ *
+ * Both call onSuccess() after a successful response so the parent re-fetches.
  */
 function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => void }) {
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false);               // "Retry Now" spinner
+  const [reprocessing, setReprocessing] = useState(false); // "Reprocess" spinner
   const [localErr, setLocalErr] = useState<string | null>(null);
 
   const retryCount = row.retry_count ?? 0;
@@ -327,6 +341,11 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     (row.status === 'failed' || row.status === 'partial') &&
     retryCount < maxRetries &&
     row.last_retry_outcome !== 'permanent_failure';
+  // Reprocess is available on ANY failed/partial row — even terminal ones.
+  // That's the whole point: after a code deploy, we want to retry rows that
+  // the retry worker is deliberately ignoring because they were classified
+  // as permanently unsupported.
+  const canReprocess = row.status === 'failed' || row.status === 'partial';
   const exhausted = retryCount >= maxRetries;
   const scheduledIso = row.is_retryable ? row.next_retry_at : null;
 
@@ -360,8 +379,41 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     // with fresh state, so no need to setBusy(false).
   }
 
+  /**
+   * Re-run the original attachment through the current dispatcher.
+   * Works regardless of retry classification — this is the "the code
+   * has been updated, please try again" button.
+   */
+  async function handleReprocess() {
+    setReprocessing(true);
+    setLocalErr(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? '';
+
+      const resp = await fetch('/api/admin/reprocess-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ emailLogId: row.id }),
+      });
+      const json = await resp.json();
+      if (!resp.ok || json.ok === false) {
+        throw new Error(json.error || `HTTP ${resp.status}`);
+      }
+      onSuccess?.();
+    } catch (e) {
+      setLocalErr(e instanceof Error ? e.message : String(e));
+      setReprocessing(false);
+    }
+  }
+
   // Nothing interesting to show — keep the cell tidy.
-  if (retryCount === 0 && !canRetry && !scheduledIso) {
+  // (canReprocess covers every failed/partial row, so the cell only collapses
+  //  to "—" for clean rows with no retry history.)
+  if (retryCount === 0 && !canRetry && !scheduledIso && !canReprocess) {
     return <span style={{ color: colors.darkGray, fontSize: '12px' }}>—</span>;
   }
 
@@ -378,11 +430,21 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
       {canRetry && (
         <button
           onClick={handleClick}
-          disabled={busy}
+          disabled={busy || reprocessing}
           style={retryButtonStyle(busy)}
           title="Retry this email now, bypassing the automatic backoff"
         >
           {busy ? 'Retrying…' : 'Retry Now'}
+        </button>
+      )}
+      {canReprocess && (
+        <button
+          onClick={handleReprocess}
+          disabled={busy || reprocessing}
+          style={reprocessButtonStyle(reprocessing)}
+          title="Re-fetch this attachment and run it through the dispatcher again. Useful after a code deploy adds new parser support."
+        >
+          {reprocessing ? 'Reprocessing…' : '↻ Reprocess'}
         </button>
       )}
       {!canRetry && scheduledIso && (
@@ -451,6 +513,32 @@ function retryButtonStyle(busy: boolean): React.CSSProperties {
     border: 'none',
     borderRadius: '4px',
     padding: '4px 10px',
+    fontSize: '11px',
+    fontWeight: 600,
+    cursor: busy ? 'wait' : 'pointer',
+    width: 'fit-content',
+    letterSpacing: '0.3px',
+  };
+}
+
+/**
+ * Reprocess button — deliberately quieter than the teal "Retry Now" button.
+ * Border-only with midnight-navy text so it reads as a secondary, "admin-ish"
+ * action. The primary signal in the row should still be the status pill and
+ * the retry counter; Reprocess is there for when Caleb has just deployed
+ * new parser support and wants to re-run failed rows through the dispatcher.
+ *
+ * NOTE: our theme's `steelBlue` is a light tint (#C7CCE4) designed for text on
+ * the navy header, so it's too washed-out to work as border/text on a white
+ * card. We use `midnightNavy` + `mediumGray` border for adequate contrast.
+ */
+function reprocessButtonStyle(busy: boolean): React.CSSProperties {
+  return {
+    backgroundColor: colors.white,
+    color: busy ? colors.darkGray : colors.midnightNavy,
+    border: `1px solid ${busy ? colors.lightGray : colors.mediumGray}`,
+    borderRadius: '4px',
+    padding: '3px 9px',
     fontSize: '11px',
     fontWeight: 600,
     cursor: busy ? 'wait' : 'pointer',
