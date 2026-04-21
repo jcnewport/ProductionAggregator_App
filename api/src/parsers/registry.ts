@@ -24,6 +24,7 @@ import { hierarchicalAllocatedXlsxAdapter } from './hierarchicalAllocatedXlsx.js
 import { btaDailyPerWellXlsxAdapter } from './btaDailyPerWellXlsx.js';
 import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
 import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
+import { pdsXtoMonthlyAdapter } from './pdsXtoMonthly.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -115,23 +116,25 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'HIGH complexity. Extra columns (BTU, Oil Begin/End, Compl.ID). API is 8-digit — needs padding/lookup. Oil Begin/End are tank gauge, do NOT map to Oil Prod/Sales.',
   },
 
-  // ─── Format 4 — PDS XTO Monthly (STUB) ───
+  // ─── Format 4 — PDS XTO Monthly (IMPLEMENTED) ───
+  //
+  // XTO is the most column-rich PDS monthly — 15 columns vs. EOG's 11. The
+  // extra columns are all things we must NOT map to the ComboCurve template:
+  //   - OilCum, GasCum (cumulative running totals)
+  //   - GasInj (gas injection)
+  //   - Pressure Base (regulatory 15.03 psi)
+  //   - Producing Status ("Active") and Well Status ("Producing Oil")
+  // All are preserved in extraFields for audit but never miscoded as
+  // production volumes. Positional (x/y) extraction same as EOG/BTA WIO.
+  // Row-bucket size = 6 pt (vs EOG's 4) because XTO rows sit ~10-12 pt
+  // apart with 2-pt drift, which a 4-pt bucket can't absorb without
+  // splitting the wellName off the data row.
   {
-    adapter: stubAdapter({
-      name: 'PDS XTO Monthly',
-      operatorName: 'XTO Energy (ExxonMobil)',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@xtoenergy\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Monthly Production Estimates', 'PDS Well Data Exchange') &&
-        /XTO ENERGY/i.test(ctx.pdfText),
-    }),
+    adapter: pdsXtoMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-XTO-MONTHLY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'HIGH complexity. Cumulative cols (OilCum, GasCum) must NOT map to template. Has GasInj, Producing/Well Status. Some historical OilProd values appear to be data artifacts.',
+      'Positional x/y extraction (pagerender override). 15 columns. Cumulative OilCum/GasCum preserved in extraFields — NOT mapped to volumes. GasInj, Pressure Base, Producing Status, Well Status all in extraFields. "Well Num" column holds 10-digit API → padded with "0000" to derive API14. 6-pt row bucket.',
   },
 
   // ─── Format 5 — PDS ConocoPhillips Daily (STUB) ───
