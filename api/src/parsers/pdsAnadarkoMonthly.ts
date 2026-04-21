@@ -24,6 +24,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 // Re-export so any existing callers (e.g. services/productionStorage.ts) that
 // imported `ProductionRecord` from this file keep compiling.
@@ -41,10 +42,10 @@ function parseNum(token: string): number | null {
 
 /**
  * Given a string containing a 14-digit API at the start, truncate to 10 digits.
- * Always returned as a 10-character string (preserves leading zeros per domain rules).
+ * Delegates to the shared normalizer so padding logic stays in one place.
  */
 function toApi10(api14: string): string {
-  return api14.slice(0, 10).padStart(10, '0');
+  return normalizeApi(api14).api10;
 }
 
 /**

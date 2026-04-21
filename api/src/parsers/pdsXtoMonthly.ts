@@ -56,6 +56,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Local utilities
@@ -77,16 +78,12 @@ function normalizeMonthlyDate(isoDate: string): string {
 }
 
 /**
- * XTO's "Well Num" column holds a 10-digit API-like number. We store it as
- * API10 and derive API14 by padding trailing "0000" (project convention when
- * the operator doesn't provide sidetrack/completion digits).
+ * XTO's "Well Num" column holds a 10-digit API-like number. Delegates to
+ * the shared normalizer, which right-pads 10-digit inputs to 14 with "0000"
+ * (project convention when the operator doesn't provide sidetrack/completion).
  */
 function wellNumToApi(wellNum: string): { api10: string; api14: string } {
-  const digits = wellNum.replace(/\D/g, '');
-  if (digits === '') return { api10: '', api14: '' };
-  const api10 = digits.slice(0, 10).padStart(10, '0');
-  const api14 = (api10 + '0000').slice(0, 14);
-  return { api10, api14 };
+  return normalizeApi(wellNum);
 }
 
 /* ────────────────────────────────────────────────────────────────

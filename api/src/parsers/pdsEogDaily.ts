@@ -35,6 +35,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 function parseNum(token: string | undefined | null): number | null {
   if (token === null || token === undefined) return null;
@@ -45,13 +46,7 @@ function parseNum(token: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function normalizeApi(rawApi: string): { api10: string; api14: string } {
-  const digits = rawApi.replace(/\D/g, '');
-  if (digits === '') return { api10: '', api14: '' };
-  const api10 = digits.slice(0, 10).padStart(10, '0');
-  const api14 = digits.length >= 14 ? digits.slice(0, 14) : (digits + '0000').slice(0, 14);
-  return { api10, api14 };
-}
+// normalizeApi imported from apiNormalization.js (shared, correctness-validated).
 
 type TextItem = { x: number; y: number; str: string; page: number };
 

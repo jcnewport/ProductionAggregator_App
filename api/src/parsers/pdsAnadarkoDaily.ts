@@ -49,6 +49,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Local utilities
@@ -63,19 +64,8 @@ function parseNum(token: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * 14-digit Anadarko API → api10 (first 10) + api14 (full 14).
- * Project convention: api14.slice(0,10) === api10 is the invariant
- * we enforce across parsers; Anadarko's width makes it trivially true.
- */
-function normalizeApi(rawApi: string): { api10: string; api14: string } {
-  const digits = rawApi.replace(/\D/g, '');
-  if (digits === '') return { api10: '', api14: '' };
-  const api10 = digits.slice(0, 10).padStart(10, '0');
-  // If source provides 14 digits, use them verbatim. Otherwise pad.
-  const api14 = digits.length >= 14 ? digits.slice(0, 14) : (digits + '0000').slice(0, 14);
-  return { api10, api14 };
-}
+// normalizeApi imported from apiNormalization.js (shared, correctness-validated).
+// Anadarko supplies a 14-digit API, which is the simple passthrough case.
 
 /* ────────────────────────────────────────────────────────────────
  * Positional extraction — same pattern as pdsConocoPhillipsDaily.

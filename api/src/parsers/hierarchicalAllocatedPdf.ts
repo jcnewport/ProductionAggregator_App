@@ -86,6 +86,7 @@
  */
 
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Utilities — intentionally local (no cross-file coupling).
@@ -108,19 +109,15 @@ function mdyToIso(line: string): string | null {
   return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 }
 
-/** Pad a digits-only string out to 14 with trailing zeros. */
+/** Pad a digits-only string out to 14 with trailing zeros. Delegates to
+ *  shared normalizer so 8/10/12/14-digit inputs all use the same logic. */
 function toApi14(digits: string): string {
-  const d = digits.replace(/\D/g, '');
-  if (d === '') return '';
-  if (d.length >= 14) return d.slice(0, 14);
-  return d.padEnd(14, '0');
+  return normalizeApi(digits).api14;
 }
 
-/** Return the first 10 digits of a digits-only string. */
+/** Return the 10-digit API for a digits-only string. Delegates to shared normalizer. */
 function toApi10(digits: string): string {
-  const d = digits.replace(/\D/g, '');
-  if (d === '') return '';
-  return d.slice(0, 10).padStart(10, '0');
+  return normalizeApi(digits).api10;
 }
 
 /**

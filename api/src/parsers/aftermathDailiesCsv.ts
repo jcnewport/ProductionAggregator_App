@@ -34,6 +34,7 @@
  */
 
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Small utilities
@@ -65,17 +66,15 @@ function parseSciInt(token: string | undefined | null): number | null {
   return Math.round(n);
 }
 
-/** "4230135870" → "42301358700000"  (10 digits → 14 with trailing zeros). */
+/** "4230135870" → "42301358700000"  (10 digits → 14 with trailing zeros).
+ *  Delegates to shared normalizer so padding logic stays in one place. */
 function api10ToApi14(api10: string): string {
-  const cleaned = api10.replace(/\D/g, '');
-  if (cleaned.length >= 14) return cleaned.slice(0, 14);
-  return cleaned.padEnd(14, '0');
+  return normalizeApi(api10).api14;
 }
 
-/** Left-pad to 10 chars so leading zeros survive. */
+/** Digits-only, project-convention API10. Delegates to shared normalizer. */
 function toApi10(anyApi: string): string {
-  const cleaned = anyApi.replace(/\D/g, '');
-  return cleaned.slice(0, 10).padStart(10, '0');
+  return normalizeApi(anyApi).api10;
 }
 
 /** "4/6/2026" → "2026-04-06" ; "12/31/2025" → "2025-12-31". */

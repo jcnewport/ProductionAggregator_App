@@ -38,6 +38,7 @@
 
 import * as XLSX from 'xlsx';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Small utilities — kept local so this adapter has no runtime
@@ -55,20 +56,17 @@ function parseNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** "4211534077" or "42-115-34077" → "4211534077" (10-digit string, zero-padded). */
+/** "4211534077" or "42-115-34077" → "4211534077" (10-digit string).
+ *  Delegates to shared normalizer. */
 function toApi10(raw: unknown): string {
-  if (raw === null || raw === undefined) return '';
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits === '') return '';
-  return digits.slice(0, 10).padStart(10, '0');
+  // normalizeApi tolerates null/undefined and returns { api10: '', api14: '' }.
+  return normalizeApi(raw as any).api10;
 }
 
-/** 10-digit API → 14-digit (pad sidetrack + completion with trailing zeros). */
+/** 10-digit API → 14-digit (pad sidetrack + completion with trailing zeros).
+ *  Delegates to shared normalizer. */
 function api10ToApi14(api10: string): string {
-  const digits = api10.replace(/\D/g, '');
-  if (digits === '') return '';
-  if (digits.length >= 14) return digits.slice(0, 14);
-  return digits.padEnd(14, '0');
+  return normalizeApi(api10).api14;
 }
 
 /**

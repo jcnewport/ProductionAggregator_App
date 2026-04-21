@@ -52,6 +52,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Local utilities
@@ -66,24 +67,8 @@ function parseNum(token: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * 12-digit API (ConocoPhillips format) → API10 (first 10) + API14 (pad with "00").
- * Project convention: always store API10 as 10-char text with leading
- * zeros preserved; derive API14 by padding missing sidetrack+completion
- * digits with "0".
- */
-function normalizeApi(
-  rawApi: string
-): { api10: string; api14: string } {
-  const digits = rawApi.replace(/\D/g, '');
-  if (digits === '') return { api10: '', api14: '' };
-  const api10 = digits.slice(0, 10).padStart(10, '0');
-  // Pad to 14 with trailing zeros — if the source gave us 12 digits,
-  // that means state+county+well+sidetrack(2)+completion(2) minus 2
-  // trailing completion digits. Conservative fill: zeros.
-  const api14 = (digits + '0000').slice(0, 14);
-  return { api10, api14 };
-}
+// normalizeApi imported from apiNormalization.js (shared, correctness-validated).
+// ConocoPhillips supplies 12-digit APIs — the shared module right-pads to 14.
 
 /* ────────────────────────────────────────────────────────────────
  * Positional extraction — shares pattern with pdsEogMonthly & btaWioMailoutPdf.

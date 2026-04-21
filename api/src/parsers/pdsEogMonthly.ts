@@ -43,6 +43,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Local utilities
@@ -65,9 +66,7 @@ function normalizeMonthlyDate(isoDate: string): string {
 
 /** 14-digit API → first 10 chars (preserves leading zeros). */
 function api14ToApi10(api14: string): string {
-  const digits = api14.replace(/\D/g, '');
-  if (digits === '') return '';
-  return digits.slice(0, 10).padStart(10, '0');
+  return normalizeApi(api14).api10;
 }
 
 /* ────────────────────────────────────────────────────────────────

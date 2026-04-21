@@ -61,6 +61,7 @@
  */
 
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ════════════════════════════════════════════════════════════════
  * SECTION 1 — Alias dictionary
@@ -452,21 +453,18 @@ function parseSciInt(token: string | undefined | null): number | null {
   return Math.round(n);
 }
 
-/** Digits only, left-padded to 10 so leading zeros survive. */
+/** Digits only, project-convention API10. Delegates to shared normalizer.
+ *  Note: Scientific-notation API values like "3.00E+13" already lose
+ *  precision at the Excel layer — we can't recover the true 14-digit API
+ *  from that float, so callers must still prefer a real 14-digit column
+ *  over this helper when present. */
 function toApi10(anyApi: string): string {
-  const cleaned = String(anyApi).replace(/\D/g, '');
-  if (cleaned.length === 0) return '';
-  // Scientific-notation API values like "3.00E+13" lose precision — we
-  // can't recover the true 14-digit API from that float, so callers must
-  // prefer a real 14-digit `api14` column if present before falling back.
-  return cleaned.slice(0, 10).padStart(10, '0');
+  return normalizeApi(anyApi).api10;
 }
 
-/** 10-digit → 14-digit with trailing zeros. */
+/** 10-digit → 14-digit with trailing zeros. Delegates to shared normalizer. */
 function api10ToApi14(api10: string): string {
-  const cleaned = api10.replace(/\D/g, '');
-  if (cleaned.length >= 14) return cleaned.slice(0, 14);
-  return cleaned.padEnd(14, '0');
+  return normalizeApi(api10).api14;
 }
 
 /**
@@ -768,14 +766,10 @@ function parseRow(
   const apiSource = goodCandidate || fallbackCandidate || '';
 
   if (apiSource) {
-    const digits = cleanDigits(apiSource);
-    if (digits.length >= 14) {
-      api14 = digits.slice(0, 14);
-      api10 = digits.slice(0, 10).padStart(10, '0');
-    } else if (digits.length >= 8) {
-      api10 = toApi10(apiSource);
-      api14 = api10ToApi14(api10);
-    }
+    // Single shared normalizer handles 8/10/12/14-digit inputs correctly.
+    const pair = normalizeApi(apiSource);
+    api10 = pair.api10;
+    api14 = pair.api14;
   }
 
   if (!api10 && !wellName) {
