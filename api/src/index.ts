@@ -16,6 +16,7 @@ import path from 'path';
 import fs from 'fs';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
 import exportsRouter from './routes/exports.js';
+import adminRouter from './routes/admin.js';
 
 // Load environment variables
 dotenv.config();
@@ -52,6 +53,11 @@ app.post('/api/poll', async (_req, res) => {
 //   GET /api/export/monthly?start=YYYY-MM&end=YYYY-MM
 //   GET /api/export/daily?start=YYYY-MM-DD&end=YYYY-MM-DD
 app.use('/api/export', exportsRouter);
+
+// Admin operations — reprocess failed emails, etc.
+//   POST /api/admin/reprocess-email     { emailLogId?, gmailMessageId? }
+//   POST /api/admin/reprocess-failed    { statuses?, limit? }
+app.use('/api/admin', adminRouter);
 
 // TODO: Mount additional route handlers
 // app.use('/api/emails', emailRoutes);
