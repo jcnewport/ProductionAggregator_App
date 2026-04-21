@@ -122,6 +122,30 @@ export async function processMessage(messageId: string): Promise<void> {
     const message = await getMessageWithAttachments(messageId);
     emailLogId = await createEmailLogRow(message);
 
+    // Clean slate for re-runs. If this is a reprocess (or a poller retry of
+    // a message whose previous attempt failed), wipe any prior flagged rows
+    // so the dashboard only reflects the current run's outcome. Without
+    // this, successful rescues leave stale flagged_records behind — which
+    // is exactly what bit us on 2026-04-21 with the 9 TREME 21H rows.
+    // Best-effort: a failure here must not block the import.
+    try {
+      const { error: clearErr } = await supabase
+        .from('flagged_records')
+        .delete()
+        .eq('email_log_id', emailLogId);
+      if (clearErr) {
+        console.warn(
+          `[emailPoller] Failed to clear prior flagged_records for email ${emailLogId}: ${clearErr.message}`
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[emailPoller] Unexpected error clearing flagged_records for email ${emailLogId}: ${
+          (err as Error).message
+        }`
+      );
+    }
+
     if (message.attachments.length === 0) {
       await finalizeEmailLog(emailLogId, 'skipped', 0, ['No attachments found']);
       await markMessageRead(messageId);

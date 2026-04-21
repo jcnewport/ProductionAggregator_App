@@ -193,6 +193,43 @@ console.log('\nFuzzy tie-breaker — refuse near-ties');
   assert(r.matched === null && r.reason.includes('ambiguous fuzzy'), 'Reason: ambiguous fuzzy');
 }
 
+// skipFuzzy option — Tier-1/Tier-2-only resolution for valid-but-wrong api10 pre-emption
+console.log('\nskipFuzzy option — exact/alias only, no guessing');
+{
+  // With skipFuzzy: true, a query that would fuzzy-match should refuse.
+  const r = resolveWellByName('EFG STATE 57-T2-42 #1H', index, { skipFuzzy: true });
+  assert(r.matched === null, 'skipFuzzy: fuzzy-only match refused');
+  assert(
+    r.matched === null && r.reason.includes('fuzzy disabled'),
+    'Reason cites fuzzy-disabled',
+    r.matched === null ? r.reason : 'matched'
+  );
+}
+{
+  // Tier 1 exact match should still work with skipFuzzy: true.
+  const r = resolveWellByName('EFG STATE 57-T2-42 1H', index, { skipFuzzy: true });
+  assert(r.matched?.id === wEfg1H.id, 'skipFuzzy: Tier 1 exact still works');
+  assert(r.matched !== null && r.tier === 'exact', 'Tier reported as exact');
+}
+{
+  // Tier 2 alias match should still work with skipFuzzy: true.
+  const r = resolveWellByName('Hideout 24-13 State Com #1H (PSHA) - 2211506', index, {
+    skipFuzzy: true,
+  });
+  assert(r.matched?.id === wHideout1H.id, 'skipFuzzy: Tier 2 alias still works');
+  assert(r.matched !== null && r.tier === 'alias', 'Tier reported as alias');
+}
+{
+  // Duplicate-name case should still flag, not guess.
+  const r = resolveWellByName('DUPLICATE NAME', index, { skipFuzzy: true });
+  assert(r.matched === null, 'skipFuzzy: duplicate names still refused');
+  assert(
+    r.matched === null && r.reason.includes('ambiguous'),
+    'Reason cites ambiguous',
+    r.matched === null ? r.reason : 'matched'
+  );
+}
+
 // ─── Summary ──────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed.`);

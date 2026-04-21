@@ -56,6 +56,24 @@ export interface ResolverIndex {
   aliases: Array<{ alias: string; well: ResolvedWell }>;
 }
 
+/**
+ * Options for tuning resolver behavior per-call.
+ *
+ * skipFuzzy:
+ *   When true, the resolver stops after Tier 1 (exact name) and Tier 2
+ *   (exact alias). Tier 3 (fuzzy Levenshtein) is treated as a refusal.
+ *   Rationale: fuzzy is a "guess" tier. Callers that are trying to
+ *   pre-empt a silently-wrong value (e.g. an operator-supplied api10 that
+ *   happens to be valid but points at the wrong well) should never
+ *   second-guess with approximate matching — that's double uncertainty
+ *   (wrong api10 + wrong name shape) and can silently reroute data.
+ *   Only use fuzzy when the record was going to be rejected anyway
+ *   (missing/invalid api10).
+ */
+export interface ResolveOptions {
+  skipFuzzy?: boolean;
+}
+
 // ─── Normalization ────────────────────────────────────────────────
 
 /**
@@ -182,7 +200,8 @@ export async function loadResolverIndex(): Promise<ResolverIndex> {
  */
 export function resolveWellByName(
   wellName: string,
-  index: ResolverIndex
+  index: ResolverIndex,
+  options?: ResolveOptions
 ): ResolveOutcome {
   const originalQuery = wellName;
 
@@ -221,6 +240,16 @@ export function resolveWellByName(
   }
 
   // ── Tier 3: fuzzy match against wells + aliases ────────────────
+  //   If the caller opted out of fuzzy (e.g. pre-empting valid-but-wrong
+  //   operator api10s where guessing is unsafe), return a clear refusal.
+  if (options?.skipFuzzy) {
+    return {
+      matched: null,
+      reason: `no exact or alias match for "${wellName}" (fuzzy disabled by caller)`,
+      originalQuery,
+    };
+  }
+
   //   Score everything. If a single candidate clears the threshold AND
   //   beats the runner-up by at least 0.05, we accept it. If two or
   //   more are within 0.05 of the top score, we refuse (ambiguous).

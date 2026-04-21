@@ -265,41 +265,54 @@ function toRowShape(
 }
 
 /**
- * Hydrate records missing api10 by resolving the well name against the
- * `wells` + `well_name_aliases` tables.
+ * Hydrate records via the well-name resolver BEFORE api10-validation.
  *
- * Why this runs BEFORE partitionByValidApi10:
- *   Parsers for BTA Daily/WIO, Frio Daily, and the Hierarchical XLSX/PDF
- *   format (Monthly_Report.xlsx — the Gretchen/EFG STATE case) deliberately
- *   emit ProductionRecords with `api10=""` because their source files have
- *   NO API column. Without this resolver those records would all be rejected
- *   by the validator as "invalid api10". With the resolver, a known well
- *   name (or a fuzzy variant thereof) pulls api10/api14/combocurve_well_id
- *   from the canonical wells table and the record sails through validation.
+ * Two paths through this function:
+ *
+ *   Path A — INVALID api10 + well_name:
+ *     Used by parsers that emit `api10=""` (Monthly_Report.xlsx, BTA Daily/WIO,
+ *     Frio Daily) because their source files have no API column. Resolves
+ *     through ALL THREE tiers (exact → alias → fuzzy). Safe to fuzzy here
+ *     because the record was already going to be rejected by the validator
+ *     — fuzzy is a rescue, not a rewrite.
+ *
+ *   Path B — VALID api10 but NOT in our wells table + well_name:
+ *     Added 2026-04-21 after the Oak & Treme CSV was found to carry wrong
+ *     api10 `4230100413` for TREME 55-1-32 UNIT 21H (canonical is
+ *     `4230136828` per Kyle's catalog). Without this path, storage
+ *     silently creates a phantom well on every reprocess. Resolves through
+ *     TIER 1 + TIER 2 ONLY — fuzzy is deliberately OFF here (Caleb's
+ *     "no guessing" rule, 2026-04-21). Rationale: when the operator's
+ *     api10 is wrong, fuzzy-matching on a possibly-also-wrong well_name
+ *     is stacking uncertainty. Exact/alias is enough; anything weaker
+ *     creates a new well and the human dedupes later.
  *
  * What this function does NOT do:
- *   - Never overwrites a parser-supplied api10. If the record already has
- *     a valid api10, we trust it (parsers that DO extract APIs remain
- *     authoritative — well-name collisions shouldn't let a resolver
- *     second-guess a clean parse).
- *   - Never guesses in collision cases. Ambiguous matches return
- *     {matched: null, reason: ...} and the record falls through to the
- *     validator, which sends it to flagged_records with that reason.
+ *   - Never overwrites a Path-A record's api10 via guessing when the
+ *     well_name is unresolvable. Unmatched records fall through to the
+ *     validator, which flags them with the resolver's "no match" reason.
+ *   - Never overwrites a Path-B record's api10 when there's no exact/alias
+ *     match. Genuinely-new wells create new rows — that's correct, because
+ *     we don't know they're "wrong."
+ *
+ * Audit trail:
+ *   Path-B rewrites stash the operator's ORIGINAL api10/api14 in
+ *   extra_fields.originalOperatorApi10 / originalOperatorApi14 so a human
+ *   can later see that a rewrite happened and trace it back.
  *
  * Side effect (best-effort):
- *   On a successful FUZZY match, we record the original wellName string
- *   as an alias so next time it's an exact hit. Fail-open on write error.
+ *   On a successful FUZZY match (Path A only), we record the original
+ *   wellName string as an alias so next time it's an exact hit.
  */
 async function hydrateMissingApis(
   records: ProductionRecord[],
   context: StorageContext,
   granularity: 'monthly' | 'daily'
 ): Promise<ProductionRecord[]> {
-  // Fast path: if every record already has a valid api10, skip the index
-  // load entirely. This is the 99% case — only hierarchical / BTA / Frio
-  // formats land us in the resolver path.
-  const needsResolve = records.some((r) => !isValidApi10(r.api10) && r.wellName);
-  if (!needsResolve) return records;
+  // Fast path: if no record has a well_name, no resolver could possibly help
+  // on either path. Skip the index load.
+  const anyWithWellName = records.some((r) => r.wellName);
+  if (!anyWithWellName) return records;
 
   let index: ResolverIndex;
   try {
@@ -312,46 +325,79 @@ async function hydrateMissingApis(
     return records;
   }
 
+  // O(1) membership check for Path B: "is this api10 already in our wells?"
+  const knownApi10s = new Set(index.wells.map((w) => w.api10));
+
   let resolvedExact = 0;
   let resolvedAlias = 0;
   let resolvedFuzzy = 0;
+  let preempted = 0; // Path-B rewrites
   const fuzzyWriteBacks: Array<{ query: string; wellId: string }> = [];
 
   const hydrated = records.map((r) => {
-    if (isValidApi10(r.api10) || !r.wellName) return r;
+    if (!r.wellName) return r;
+    const api10Valid = isValidApi10(r.api10);
 
-    const outcome = resolveWellByName(r.wellName, index);
-    if (outcome.matched) {
-      if (outcome.tier === 'exact') resolvedExact++;
-      else if (outcome.tier === 'alias') resolvedAlias++;
-      else {
-        resolvedFuzzy++;
-        fuzzyWriteBacks.push({ query: outcome.originalQuery, wellId: outcome.matched.id });
+    // Fully-trusted case: valid api10 that already exists as a canonical well.
+    if (api10Valid && knownApi10s.has(r.api10)) return r;
+
+    if (!api10Valid) {
+      // ── Path A ── all 3 tiers (fuzzy allowed — record would otherwise fail)
+      const outcome = resolveWellByName(r.wellName, index);
+      if (outcome.matched) {
+        if (outcome.tier === 'exact') resolvedExact++;
+        else if (outcome.tier === 'alias') resolvedAlias++;
+        else {
+          resolvedFuzzy++;
+          fuzzyWriteBacks.push({ query: outcome.originalQuery, wellId: outcome.matched.id });
+        }
+        return {
+          ...r,
+          api10: outcome.matched.api10,
+          api14: outcome.matched.api14,
+          combocurveWellId: outcome.matched.combocurve_well_id,
+        };
       }
+      // No match — leave record as-is. partitionByValidApi10 will reject it
+      // and writeFlaggedRecords will surface the name-resolver reason.
+      return {
+        ...r,
+        extraFields: {
+          ...r.extraFields,
+          wellNameResolverNote: outcome.reason,
+        },
+      };
+    }
+
+    // ── Path B ── valid api10 but unknown well → Tier 1/2 only, no guessing
+    const outcome = resolveWellByName(r.wellName, index, { skipFuzzy: true });
+    if (outcome.matched) {
+      preempted++;
       return {
         ...r,
         api10: outcome.matched.api10,
         api14: outcome.matched.api14,
         combocurveWellId: outcome.matched.combocurve_well_id,
+        extraFields: {
+          ...r.extraFields,
+          originalOperatorApi10: r.api10,
+          originalOperatorApi14: r.api14 || null,
+          preemptionTier: outcome.tier,
+        },
       };
     }
-    // No match — leave record as-is. partitionByValidApi10 will reject it
-    // and writeFlaggedRecords will surface the name-resolver reason.
-    return {
-      ...r,
-      extraFields: {
-        ...r.extraFields,
-        wellNameResolverNote: outcome.reason,
-      },
-    };
+    // No exact/alias match — this is a genuinely-new well. Let storage create
+    // it under the operator's api10; if the api10 turns out to be wrong,
+    // a human will dedupe manually and add an alias.
+    return r;
   });
 
-  const resolvedTotal = resolvedExact + resolvedAlias + resolvedFuzzy;
+  const resolvedTotal = resolvedExact + resolvedAlias + resolvedFuzzy + preempted;
   if (resolvedTotal > 0) {
     console.log(
       `[productionStorage] Well-name resolver hydrated ${resolvedTotal} ${granularity} records ` +
         `from "${context.sourceFileName}" ` +
-        `(exact=${resolvedExact}, alias=${resolvedAlias}, fuzzy=${resolvedFuzzy}).`
+        `(exact=${resolvedExact}, alias=${resolvedAlias}, fuzzy=${resolvedFuzzy}, preempted=${preempted}).`
     );
   }
 
