@@ -183,6 +183,42 @@ const combocurveWellCatalog: NonProductionFilter = {
   },
 };
 
+/**
+ * Inline image attachments (PNG / JPG / GIF / etc.)
+ * -------------------------------------------------
+ * Emails forwarded from Outlook (and Apple Mail, Gmail's own composer, etc.)
+ * commonly carry the sender's signature image as an "attachment" rather than
+ * embedded HTML. Gmail's API returns those right alongside the real payload.
+ *
+ * Before this filter existed, ONE small PNG (e.g. "Outlook-zqz425aa.png") was
+ * enough to mark an entire multi-attachment email as 'failed' — even if the
+ * other attachments parsed cleanly — because the PNG hit the "unsupported
+ * file type" branch and landed in errors[].
+ *
+ * Policy: we never parse images. If someone ever has a production report that
+ * only exists as an image, the right workflow is to send the source workbook
+ * or a text-based PDF. We take a broad match (any file kind 'image') and
+ * quietly classify it as ignored.
+ *
+ * NOTE: fileKind='image' is assigned by detectFileKind() in parsers/index.ts
+ * based on mime/extension. This filter runs BEFORE the 'unknown'/'image'
+ * short-circuit in the dispatcher (see re-ordering in parsers/index.ts).
+ */
+const inlineImageAttachment: NonProductionFilter = {
+  name: 'inline-image-attachment',
+  category: 'inline image / email signature',
+  fileKinds: ['image'],
+  detect(ctx: ParserContext): string | null {
+    // Any file that made it to fileKind='image' is, by policy, ignored.
+    // No further signature check needed — filename/mime already classified it.
+    return (
+      `Inline image attachment (${ctx.mimeType || ctx.filename}) — ` +
+      'treated as email-signature graphic, not production data. ' +
+      'If this was a real report, ask the sender to forward the source workbook/PDF.'
+    );
+  },
+};
+
 /* ────────────────────────────────────────────────────────────────
  * Registry — order matters: most specific first. The dispatcher
  * short-circuits on the first match.
@@ -192,4 +228,5 @@ export const NON_PRODUCTION_FILTERS: readonly NonProductionFilter[] = [
   combocurveTemplateSample,
   ourOwnTestExport,
   combocurveWellCatalog,
+  inlineImageAttachment,
 ] as const;

@@ -85,7 +85,35 @@ async function main() {
   let pass = 0;
   let fail = 0;
 
-  console.log('── Group 1: non-production files must be IGNORED ──');
+  console.log('── Group 0: synthetic inline-image attachment must be IGNORED ──');
+  // We don't need a real image on disk — the filter keys off fileKind='image',
+  // and detectFileKind() decides from mime/extension alone. A zero-byte buffer
+  // with the right filename + mime is enough to exercise the full dispatch path.
+  {
+    const imgOutcome = await dispatchParser(
+      {
+        filename: 'Outlook-zqz425aa.png',
+        mimeType: 'image/png',
+        data: Buffer.alloc(0),
+      } as any,
+      'someone@outlook.com'
+    );
+    if (imgOutcome.kind === 'ignored' && imgOutcome.filterName === 'inline-image-attachment') {
+      console.log(
+        `[PASS] Outlook-zqz425aa.png  filter=${imgOutcome.filterName}  category="${imgOutcome.category}"`
+      );
+      console.log(`       reason: ${imgOutcome.reason}`);
+      pass++;
+    } else {
+      console.log(
+        `[FAIL] Outlook-zqz425aa.png: expected filter=inline-image-attachment, got kind=${imgOutcome.kind}`
+      );
+      if (imgOutcome.kind === 'ignored') console.log(`       filter=${imgOutcome.filterName}`);
+      fail++;
+    }
+  }
+
+  console.log('\n── Group 1: non-production files must be IGNORED ──');
   for (const c of ignoreCases) {
     const full = path.join(WORKSPACE, c.file);
     if (!fs.existsSync(full)) {

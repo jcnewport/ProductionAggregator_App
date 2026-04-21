@@ -91,6 +91,15 @@ function detectFileKind(att: EmailAttachment): FileKind {
 
   if (mime === 'text/csv' || lowerName.endsWith('.csv')) return 'csv';
 
+  // Image attachments — almost always email-signature graphics (Outlook logos,
+  // scanned headers, etc.). Classify as 'image' so the inline-image filter
+  // can ignore them without flagging a fake review item. We check BOTH mime
+  // prefix AND filename extension because Gmail sometimes flubs the mime on
+  // inline-attached images.
+  if (mime.startsWith('image/') || /\.(png|jpe?g|gif|bmp|webp|svg|tiff?)$/i.test(lowerName)) {
+    return 'image';
+  }
+
   return 'unknown';
 }
 
@@ -179,16 +188,13 @@ export async function dispatchParser(
     return { kind: 'error', message: `Failed to pre-read attachment: ${message}` };
   }
 
-  if (ctx.fileKind === 'unknown') {
-    return {
-      kind: 'unrecognized',
-      reason: `Unsupported file type: ${attachment.mimeType} (${attachment.filename})`,
-    };
-  }
-
-  // Non-production filter pass — runs BEFORE format adapters so a tracking
-  // spreadsheet / template / sample file can never accidentally match a
-  // loose adapter (e.g. Generic Production CSV) and corrupt production data.
+  // Non-production filter pass — runs BEFORE format adapters AND before the
+  // 'unknown' short-circuit. Two reasons for that ordering:
+  //   1. A tracking spreadsheet / template / sample file must never reach a
+  //      loose adapter (e.g. Generic Production CSV).
+  //   2. Image attachments (email-signature graphics) have fileKind='image';
+  //      we want the inline-image filter to classify them as 'ignored' rather
+  //      than letting them fall through to 'unrecognized'.
   for (const filter of NON_PRODUCTION_FILTERS) {
     if (!filter.fileKinds.includes(ctx.fileKind)) continue;
     let reason: string | null = null;
@@ -206,6 +212,15 @@ export async function dispatchParser(
         reason,
       };
     }
+  }
+
+  // If no filter claimed it and the file type isn't one we know how to parse,
+  // return 'unrecognized' now (AFTER the filter pass).
+  if (ctx.fileKind === 'unknown' || ctx.fileKind === 'image') {
+    return {
+      kind: 'unrecognized',
+      reason: `Unsupported file type: ${attachment.mimeType} (${attachment.filename})`,
+    };
   }
 
   // Walk the registry in order; first adapter that accepts the file kind AND

@@ -47,8 +47,13 @@ export interface ProductionRecord {
 
 /* ────────────────────────────────────────────────────────────────
  * File kinds we accept. Keeps signature checks simple per type.
+ *
+ * 'image' = PNG/JPG/GIF/etc. — almost always an email-signature image
+ *   that rode along with a real attachment. We classify these so a
+ *   NonProductionFilter can catch them cleanly ('ignored', not
+ *   'unrecognized') without clogging the flagged-review queue.
  * ──────────────────────────────────────────────────────────────── */
-export type FileKind = 'pdf' | 'xlsx' | 'xls' | 'csv' | 'unknown';
+export type FileKind = 'pdf' | 'xlsx' | 'xls' | 'csv' | 'image' | 'unknown';
 
 /* ────────────────────────────────────────────────────────────────
  * ParserContext — shared read state passed to every adapter's
