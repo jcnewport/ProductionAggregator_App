@@ -29,6 +29,7 @@ import { pdsConocoPhillipsDailyAdapter } from './pdsConocoPhillipsDaily.js';
 import { pdsAnadarkoDailyAdapter } from './pdsAnadarkoDaily.js';
 import { pdsEogDailyAdapter } from './pdsEogDaily.js';
 import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
+import { pdsMewbourneDailyAdapter } from './pdsMewbourneDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -215,27 +216,37 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Positional x/y extraction. 14 columns. GAS columns before OIL columns (unique vs other PDS dailies). 8-pt row bucket handles left/right 2-pt row-splits. 14-digit API. Detect requires "Water Inj" (no t) + "EOG Resources" and excludes Conoco.',
   },
 
-  // ─── Format 5c — PDS Mewbourne Daily (STUB) ───
+  // ─── Format 5c — PDS Mewbourne Daily (IMPLEMENTED) ───
   //
-  // Daily variant of Format 3. Inherits all the Mewbourne-Monthly complexity:
-  // 8-digit API (needs padding), extra columns (BTU, Oil Begin/End, Compl.ID
-  // — tank gauges, NOT production). Detect on operator name.
+  // Daily variant of Format 3. Same positional + column-plan +
+  // fingerprint pattern as the other PDS dailies. 10 mapped columns:
+  //   Well ID (8-digit) | Well Name | API (10-digit) | Prod Date |
+  //   Gas Prod | Oil Prod | Water Prod |
+  //   Tubing Pres. | Casing Pres. | Choke
+  //
+  // Notable differences from Mewbourne MONTHLY (Format 3 — still stub):
+  //   - Daily API is 10-DIGIT, not 8-digit like the monthly. The 8-digit
+  //     field is Mewbourne's internal "Well ID" and is stored in
+  //     operatorWellId + extraFields.mewbourneWellId.
+  //   - No BTU, no Oil Begin/End (tank gauges), no Compl.ID.
+  //   - No Sales columns (daily reports gross Prod only).
+  //   - No DaysOn, no Hours Down, no Downtime Reason.
+  //   - Pressures + Choke ARE present (monthly does not have them).
+  //   - Gas Prod comes BEFORE Oil Prod (unusual — matches EOG Daily).
+  //
+  // Sequential-proximity row clustering (4 pt) handles both single-line
+  // rows and the 2-pt well-identity sub-row split cleanly. No
+  // continuation merge needed (no free-text columns in this format).
+  //
+  // Detect: "Mewbourne Oil" + "Daily Production Estimates" + (PDS
+  // boilerplate OR the Mewbourne-specific "* Gas at State Pressure Base"
+  // footnote) and explicitly excludes other PDS operators.
   {
-    adapter: stubAdapter({
-      name: 'PDS Mewbourne Daily',
-      operatorName: 'Mewbourne Oil Company',
-      dataType: 'daily',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@mewbourne\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
-        /Mewbourne\s*Oil/i.test(ctx.pdfText),
-    }),
+    adapter: pdsMewbourneDailyAdapter,
     sampleFile: 'PDSWDX-DP-mewbourne-DAILY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'HIGH complexity — mirror of Format 3 Mewbourne Monthly with daily granularity. 8-digit API (pad to 14). BTU, Oil Begin/End are tank inventory, do NOT map to Oil Prod/Sales. Footer: "Mewbourne only provides Daily production for first 2 years of well life."',
+      'Positional x/y extraction. 10 mapped columns. Daily API is 10-digit (unlike monthly 8-digit); 8-digit Well ID stored separately in operatorWellId. No Sales/DaysOn/Downtime columns (format does not report them). Gas Prod BEFORE Oil Prod. Sequential-proximity row clustering (4 pt); no continuation merge needed.',
   },
 
   // ─── Format 5d — PDS XTO Daily (IMPLEMENTED) ───
