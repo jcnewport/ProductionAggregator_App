@@ -28,6 +28,7 @@ import { pdsXtoMonthlyAdapter } from './pdsXtoMonthly.js';
 import { pdsConocoPhillipsDailyAdapter } from './pdsConocoPhillipsDaily.js';
 import { pdsAnadarkoDailyAdapter } from './pdsAnadarkoDaily.js';
 import { pdsEogDailyAdapter } from './pdsEogDaily.js';
+import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -237,28 +238,41 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'HIGH complexity — mirror of Format 3 Mewbourne Monthly with daily granularity. 8-digit API (pad to 14). BTU, Oil Begin/End are tank inventory, do NOT map to Oil Prod/Sales. Footer: "Mewbourne only provides Daily production for first 2 years of well life."',
   },
 
-  // ─── Format 5d — PDS XTO Daily (STUB) ───
+  // ─── Format 5d — PDS XTO Daily (IMPLEMENTED) ───
   //
-  // Daily variant of Format 4. XTO reports lead with "XTO Energy, Inc." and
-  // the Fort Worth address block instead of the standard PDS boilerplate.
-  // Column headers use concatenated forms: "WellNumWellName", "OilProdOilSales",
-  // "WaterProdWaterInj". Has cumulative columns to exclude.
+  // Daily variant of Format 4. Same positional + column-plan +
+  // fingerprint pattern as the other PDS dailies, but with two
+  // XTO-specific adaptations:
+  //
+  //   1. Tank-gauge columns "Begin Oil" and "End Oil" sit between
+  //      Oil Sales and Gas Prod. They are NOT production and must
+  //      never reach the ComboCurve template. We solve this by
+  //      omitting them from the column plan entirely — items at
+  //      their x-centers fall outside the ±15 pt tolerance of any
+  //      mapped column and drop silently. "Producing Status"
+  //      ("Active" / "Shut In") is dropped the same way.
+  //
+  //   2. Row grouping: XTO rows are 22-24 pt apart (alternating),
+  //      with a 2-pt main/split AND a 10-12 pt downtime-reason text
+  //      continuation. No fixed modular row-bucket size handles all
+  //      three cleanly, so we use sequential-proximity clustering
+  //      (y within 4 pt of previous item = same row) plus a second
+  //      pass that merges orphan letter-only clusters at x >= 700
+  //      back into the preceding main row. That re-assembles multi-
+  //      line reasons like "Planned: S/I Long Term/PP".
+  //
+  // 10-digit API ("3002542063") → api14 padded with "0000".
+  // Daily date preserved as YYYY-MM-DD.
+  //
+  // Detect: "XTO Energy" + "Daily Production Estimates" + both
+  // "BeginOil" AND "EndOil" markers, and explicitly excludes every
+  // other PDS operator.
   {
-    adapter: stubAdapter({
-      name: 'PDS XTO Daily',
-      operatorName: 'XTO Energy (ExxonMobil)',
-      dataType: 'daily',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@xtoenergy\.com$/i, /@exxonmobil\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        /XTO\s*Energy/i.test(ctx.pdfText) &&
-        /Daily\s*Production\s*Estimates/i.test(ctx.pdfText),
-    }),
+    adapter: pdsXtoDailyAdapter,
     sampleFile: 'PDSWDX-DP-XTO-DAILY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'HIGH complexity — mirror of Format 4 XTO Monthly with daily granularity. Cumulative cols (not in daily but watch for them), GasInj, Producing/Well Status, Oil Begin/End tank gauges. Concatenated header labels ("WellNumWellName", "OilProdOilSales") need custom tokenization.',
+      'Positional x/y extraction. 14 mapped columns (of 17 visible). BeginOil/EndOil tank-gauge columns and Producing Status are deliberately DROPPED (not in column plan → outside ±15 pt tolerance of any mapped column). Sequential-proximity row clustering (4 pt) + orphan-merge pass for downtime-reason text wraps. 10-digit API padded to 14. Detect requires BeginOil + EndOil markers and excludes all other PDS operators.',
   },
 
   // ─── Format 6 — Aftermath Dailies CSV (IMPLEMENTED) ───
