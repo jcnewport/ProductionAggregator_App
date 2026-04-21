@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Stewardship.IS — UI Direction Mockups</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     Shared tokens — identical Deep Current / Stewardship.IS palette
+     used in theme.ts. All three options use the same brand colors;
+     what differs is composition, depth, shape, and motion.
+     ───────────────────────────────────────────────────────────── */
+  :root {
+    --midnightNavy: #212745;
+    --navyDeep: #141830;
+    --navyMid: #2A3155;
+    --navySoft: #3a4375;
+    --primary: #4E67C8;
+    --primaryLight: #DBE0F4;
+    --electricTeal: #5DCEAF;
+    --tealLight: #DEF5EF;
+    --tealBright: #4AE3B8;
+    --white: #FFFFFF;
+    --lightGray: #F2F2F2;
+    --mediumGray: #D9D9D9;
+    --darkGray: #595959;
+    --steelBlue: #C7CCE4;
+    --success: #2E7D32;
+    --successBg: #E8F5E9;
+    --warning: #FF8021;
+    --warningBg: #FFE6D2;
+    --danger: #F14124;
+    --dangerBg: #FCDAD3;
+    --info: #5ECCF3;
+    --infoBg: #DDF5FD;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #EEF0F7; color: #111; }
+
+  /* ─────────────────────────────────────────────────────────────
+     Chooser bar
+     ───────────────────────────────────────────────────────────── */
+  .chooser {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: linear-gradient(135deg, #141830 0%, #212745 100%);
+    color: white;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  }
+  .chooser h1 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--steelBlue);
+    letter-spacing: 0.2px;
+  }
+  .chooser h1 span { color: var(--electricTeal); font-weight: 700; }
+  .tab-group { display: flex; gap: 8px; margin-left: auto; }
+  .tab {
+    background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.7);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(.2,.9,.3,1.2);
+    font-family: inherit;
+  }
+  .tab:hover { background: rgba(255,255,255,0.1); color: white; transform: translateY(-1px); }
+  .tab.active {
+    background: var(--electricTeal);
+    color: var(--midnightNavy);
+    border-color: var(--electricTeal);
+    box-shadow: 0 4px 14px rgba(93, 206, 175, 0.35);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     Summary box (sticky under the chooser)
+     ───────────────────────────────────────────────────────────── */
+  .summary {
+    max-width: 1200px;
+    margin: 24px auto 0;
+    padding: 22px 28px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(33, 39, 69, 0.06);
+    border: 1px solid rgba(33,39,69,0.06);
+  }
+  .summary h2 { margin: 0 0 6px 0; font-size: 18px; color: var(--midnightNavy); font-weight: 700; }
+  .summary p { margin: 0 0 14px 0; color: var(--darkGray); font-size: 13px; line-height: 1.55; }
+  .summary .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 10px;
+  }
+  .summary-card {
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #F7F8FC;
+    border: 1px solid rgba(33,39,69,0.06);
+  }
+  .summary-card .lbl { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--darkGray); }
+  .summary-card .name { font-size: 14px; font-weight: 700; color: var(--midnightNavy); margin: 3px 0 6px; }
+  .summary-card .desc { font-size: 12px; line-height: 1.5; color: var(--darkGray); }
+
+  /* ─────────────────────────────────────────────────────────────
+     Panel stage
+     ───────────────────────────────────────────────────────────── */
+  .stage { padding: 24px 0 60px; }
+  .panel { display: none; animation: panelFade 0.45s ease; }
+  .panel.active { display: block; }
+  @keyframes panelFade {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     OPTION A — EXECUTIVE GLASS
+     Premium SaaS feel. Soft gradient canvas, glassmorphic cards,
+     generous 16-20px radii, subtle teal accents, refined hovers.
+     Think: Linear, Superhuman, Notion.
+     ═════════════════════════════════════════════════════════════ */
+  .opt-a {
+    background:
+      radial-gradient(circle at 15% 10%, rgba(93, 206, 175, 0.08) 0%, transparent 40%),
+      radial-gradient(circle at 85% 80%, rgba(78, 103, 200, 0.08) 0%, transparent 40%),
+      linear-gradient(180deg, #F5F7FC 0%, #EEF0F7 100%);
+    min-height: 900px;
+    padding: 0;
+  }
+  .opt-a .a-header {
+    background: rgba(33, 39, 69, 0.95);
+    backdrop-filter: blur(12px);
+    color: white;
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .opt-a .a-header h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .opt-a .a-header .teal { color: var(--electricTeal); font-weight: 700; }
+  .opt-a .a-nav { display: flex; gap: 4px; margin-left: 36px; }
+  .opt-a .a-nav a {
+    color: var(--steelBlue);
+    text-decoration: none;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.25s ease;
+  }
+  .opt-a .a-nav a:hover { color: white; background: rgba(255,255,255,0.05); }
+  .opt-a .a-nav a.active {
+    color: var(--electricTeal);
+    background: rgba(93, 206, 175, 0.1);
+    font-weight: 600;
+  }
+  .opt-a .a-user { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--steelBlue); }
+  .opt-a .a-btn-ghost {
+    background: rgba(255,255,255,0.06);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.12);
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-a .a-btn-ghost:hover { background: rgba(255,255,255,0.12); }
+
+  .opt-a .a-main { max-width: 1200px; margin: 0 auto; padding: 36px 32px; }
+  .opt-a .a-hero h2 {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 800;
+    color: var(--midnightNavy);
+    letter-spacing: -0.5px;
+  }
+  .opt-a .a-hero p { margin: 6px 0 0; color: var(--darkGray); font-size: 14px; }
+
+  .opt-a .a-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+    margin-top: 28px;
+  }
+  .opt-a .a-stat {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: 18px;
+    padding: 22px;
+    box-shadow:
+      0 2px 8px rgba(33, 39, 69, 0.04),
+      0 10px 40px rgba(33, 39, 69, 0.06);
+    transition: all 0.35s cubic-bezier(.2,.9,.3,1.2);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  .opt-a .a-stat::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--electricTeal), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .opt-a .a-stat:hover {
+    transform: translateY(-3px);
+    box-shadow:
+      0 4px 12px rgba(33, 39, 69, 0.06),
+      0 20px 48px rgba(33, 39, 69, 0.10);
+  }
+  .opt-a .a-stat:hover::before { opacity: 1; }
+  .opt-a .a-stat .lbl {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: var(--darkGray);
+  }
+  .opt-a .a-stat .val {
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--midnightNavy);
+    margin-top: 8px;
+    letter-spacing: -1px;
+  }
+  .opt-a .a-stat .delta {
+    font-size: 11px;
+    color: var(--success);
+    margin-top: 4px;
+    font-weight: 600;
+  }
+
+  .opt-a .a-card {
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.8);
+    border-radius: 18px;
+    padding: 26px;
+    margin-top: 24px;
+    box-shadow:
+      0 2px 8px rgba(33, 39, 69, 0.04),
+      0 10px 40px rgba(33, 39, 69, 0.06);
+  }
+  .opt-a .a-card h3 {
+    margin: 0 0 4px;
+    color: var(--midnightNavy);
+    font-size: 17px;
+    font-weight: 700;
+  }
+  .opt-a .a-card .sub {
+    margin: 0 0 18px;
+    color: var(--darkGray);
+    font-size: 13px;
+  }
+  .opt-a .a-card .empty {
+    padding: 30px;
+    background: rgba(93, 206, 175, 0.08);
+    border-radius: 12px;
+    border: 1px dashed rgba(93, 206, 175, 0.3);
+    color: var(--darkGray);
+    font-size: 13px;
+    text-align: center;
+  }
+  .opt-a .a-card .empty strong { color: var(--success); }
+
+  .opt-a .a-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .opt-a .a-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--darkGray);
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(33,39,69,0.08);
+  }
+  .opt-a .a-table td {
+    padding: 14px 12px;
+    border-bottom: 1px solid rgba(33,39,69,0.05);
+    font-size: 13px;
+    color: var(--midnightNavy);
+  }
+  .opt-a .a-table tr { transition: background 0.2s; }
+  .opt-a .a-table tbody tr:hover { background: rgba(93, 206, 175, 0.04); }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+  .pill-success { background: #E8F5E9; color: var(--success); }
+  .pill-warning { background: #FFE6D2; color: var(--warning); }
+  .pill-danger  { background: #FCDAD3; color: var(--danger); }
+  .pill-info    { background: #DDF5FD; color: #1d6a89; }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot-success { background: var(--success); }
+  .dot-warning { background: var(--warning); }
+  .dot-danger  { background: var(--danger); }
+  .dot-info    { background: #1d6a89; }
+
+  .pulse { animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(1.35); }
+  }
+
+  .btn-primary-a {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .btn-primary-a:hover {
+    background: #3d55b5;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(78, 103, 200, 0.35);
+  }
+  .btn-teal-a {
+    background: var(--electricTeal);
+    color: var(--midnightNavy);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .btn-teal-a:hover {
+    background: var(--tealBright);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(93, 206, 175, 0.4);
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     OPTION B — COMMAND CENTER
+     Dark-mode operations dashboard. Navy canvas, teal glows,
+     live pulsing indicators, animated gradient borders, medium
+     radii (12-14px). Think: Vercel dashboard, Retool, Datadog.
+     ═════════════════════════════════════════════════════════════ */
+  .opt-b {
+    background: var(--navyDeep);
+    min-height: 900px;
+    color: #E4E7F3;
+  }
+  .opt-b .b-header {
+    background: linear-gradient(180deg, #141830 0%, #1a1f3e 100%);
+    border-bottom: 1px solid rgba(93, 206, 175, 0.15);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .opt-b .b-header h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .opt-b .b-header .teal { color: var(--electricTeal); font-weight: 700; }
+  .opt-b .b-header .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--electricTeal);
+    background: rgba(93, 206, 175, 0.08);
+    padding: 4px 10px;
+    border: 1px solid rgba(93, 206, 175, 0.25);
+    border-radius: 999px;
+    margin-left: 12px;
+    letter-spacing: 0.6px;
+  }
+  .opt-b .b-nav { display: flex; gap: 4px; margin-left: 36px; }
+  .opt-b .b-nav a {
+    color: #8F95B8;
+    text-decoration: none;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.25s ease;
+    position: relative;
+  }
+  .opt-b .b-nav a:hover { color: #fff; background: rgba(255,255,255,0.04); }
+  .opt-b .b-nav a.active {
+    color: var(--electricTeal);
+    background: rgba(93, 206, 175, 0.1);
+  }
+  .opt-b .b-nav a.active::after {
+    content: '';
+    position: absolute;
+    left: 14px; right: 14px; bottom: 4px;
+    height: 2px;
+    background: var(--electricTeal);
+    border-radius: 2px;
+    box-shadow: 0 0 8px var(--electricTeal);
+  }
+  .opt-b .b-user { display: flex; align-items: center; gap: 12px; font-size: 13px; color: #8F95B8; }
+  .opt-b .b-btn-ghost {
+    background: transparent;
+    color: #E4E7F3;
+    border: 1px solid rgba(143, 149, 184, 0.3);
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-b .b-btn-ghost:hover { border-color: var(--electricTeal); color: var(--electricTeal); }
+
+  .opt-b .b-main { max-width: 1240px; margin: 0 auto; padding: 32px; }
+  .opt-b .b-hero h2 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 800;
+    color: white;
+    letter-spacing: -0.4px;
+  }
+  .opt-b .b-hero p { margin: 6px 0 0; color: #8F95B8; font-size: 14px; }
+
+  .opt-b .b-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-top: 28px;
+  }
+  .opt-b .b-stat {
+    position: relative;
+    background: linear-gradient(135deg, #1c2244 0%, #232a52 100%);
+    border: 1px solid rgba(143, 149, 184, 0.12);
+    border-radius: 14px;
+    padding: 22px;
+    overflow: hidden;
+    transition: all 0.35s ease;
+    cursor: pointer;
+  }
+  .opt-b .b-stat::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: 14px;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(93, 206, 175, 0.3), transparent 40%, transparent 60%, rgba(78, 103, 200, 0.3));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  .opt-b .b-stat:hover { transform: translateY(-3px); border-color: rgba(93, 206, 175, 0.25); }
+  .opt-b .b-stat:hover::before { opacity: 1; }
+  .opt-b .b-stat.primary::before { opacity: 0.6; }
+  .opt-b .b-stat .lbl {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #8F95B8;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .opt-b .b-stat .val {
+    font-size: 34px;
+    font-weight: 800;
+    color: white;
+    margin-top: 10px;
+    letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .opt-b .b-stat .val.teal { color: var(--electricTeal); }
+  .opt-b .b-stat .delta {
+    font-size: 11px;
+    color: var(--tealBright);
+    margin-top: 4px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .opt-b .b-card {
+    background: linear-gradient(180deg, #1c2244 0%, #1a2042 100%);
+    border: 1px solid rgba(143, 149, 184, 0.12);
+    border-radius: 14px;
+    padding: 24px;
+    margin-top: 20px;
+  }
+  .opt-b .b-card .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 18px;
+  }
+  .opt-b .b-card h3 {
+    margin: 0 0 4px;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .opt-b .b-card .sub { margin: 0; color: #8F95B8; font-size: 12px; }
+  .opt-b .b-card .empty {
+    padding: 28px;
+    background: rgba(93, 206, 175, 0.06);
+    border-radius: 10px;
+    border: 1px dashed rgba(93, 206, 175, 0.25);
+    color: #B8C0E0;
+    font-size: 13px;
+    text-align: center;
+  }
+  .opt-b .b-card .empty strong { color: var(--electricTeal); }
+
+  .opt-b .b-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .opt-b .b-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8F95B8;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(143, 149, 184, 0.12);
+  }
+  .opt-b .b-table td {
+    padding: 12px 12px;
+    border-bottom: 1px solid rgba(143, 149, 184, 0.06);
+    font-size: 13px;
+    color: #E4E7F3;
+  }
+  .opt-b .b-table tbody tr { transition: background 0.2s; }
+  .opt-b .b-table tbody tr:hover { background: rgba(93, 206, 175, 0.04); }
+
+  .opt-b .pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .opt-b .pill-success { background: rgba(93, 206, 175, 0.12); color: var(--tealBright); border: 1px solid rgba(93, 206, 175, 0.25); }
+  .opt-b .pill-warning { background: rgba(255, 128, 33, 0.12); color: #FFA966; border: 1px solid rgba(255, 128, 33, 0.3); }
+  .opt-b .pill-danger  { background: rgba(241, 65, 36, 0.12); color: #FF7A5E; border: 1px solid rgba(241, 65, 36, 0.3); }
+  .opt-b .pill-info    { background: rgba(94, 204, 243, 0.1); color: #7ED3F3; border: 1px solid rgba(94, 204, 243, 0.25); }
+
+  .opt-b .btn-teal-b {
+    background: var(--electricTeal);
+    color: var(--navyDeep);
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(.2,.9,.3,1.2);
+  }
+  .opt-b .btn-teal-b:hover {
+    background: var(--tealBright);
+    transform: translateY(-1px);
+    box-shadow: 0 0 18px rgba(93, 206, 175, 0.5);
+  }
+  .opt-b .btn-ghost-b {
+    background: transparent;
+    color: #B8C0E0;
+    border: 1px solid rgba(143, 149, 184, 0.3);
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-b .btn-ghost-b:hover { border-color: var(--electricTeal); color: var(--electricTeal); }
+
+  /* Animated pulse for "live" indicator on Option B */
+  @keyframes liveGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(93, 206, 175, 0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(93, 206, 175, 0); }
+  }
+  .opt-b .dot-live {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--electricTeal);
+    display: inline-block;
+    animation: liveGlow 1.8s ease-in-out infinite;
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     OPTION C — ENTERPRISE CONFIDENT
+     Crisp light-mode. Strong typographic hierarchy. Big numbers.
+     Financial-grade feel. 12px radii, subtle hover lifts, no fluff.
+     Think: Stripe, Ramp, modern fintech.
+     ═════════════════════════════════════════════════════════════ */
+  .opt-c {
+    background: #FAFBFC;
+    min-height: 900px;
+  }
+  .opt-c .c-header {
+    background: white;
+    border-bottom: 1px solid #E4E7ED;
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .opt-c .c-header h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--midnightNavy);
+  }
+  .opt-c .c-header .teal { color: var(--midnightNavy); }
+  .opt-c .c-header .teal::after {
+    content: '';
+    display: inline-block;
+    width: 4px; height: 4px;
+    background: var(--electricTeal);
+    border-radius: 50%;
+    margin: 0 0 3px 6px;
+    vertical-align: middle;
+  }
+  .opt-c .c-header .divider {
+    height: 20px;
+    width: 1px;
+    background: #E4E7ED;
+    margin: 0 20px;
+  }
+  .opt-c .c-nav { display: flex; gap: 2px; }
+  .opt-c .c-nav a {
+    color: #5A6378;
+    text-decoration: none;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+  }
+  .opt-c .c-nav a:hover { background: #F2F3F7; color: var(--midnightNavy); }
+  .opt-c .c-nav a.active {
+    background: #F2F3F7;
+    color: var(--midnightNavy);
+    font-weight: 600;
+  }
+  .opt-c .c-user { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #5A6378; }
+  .opt-c .c-avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--primary), var(--electricTeal));
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .opt-c .c-main { max-width: 1200px; margin: 0 auto; padding: 36px 32px; }
+  .opt-c .c-hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    margin-bottom: 4px;
+  }
+  .opt-c .c-hero h2 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--midnightNavy);
+    letter-spacing: -0.5px;
+  }
+  .opt-c .c-hero p { margin: 6px 0 0; color: #5A6378; font-size: 14px; }
+  .opt-c .c-hero-actions { display: flex; gap: 8px; }
+
+  .opt-c .c-btn-primary {
+    background: var(--midnightNavy);
+    color: white;
+    border: none;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-c .c-btn-primary:hover { background: #2A3155; transform: translateY(-1px); }
+  .opt-c .c-btn-secondary {
+    background: white;
+    color: var(--midnightNavy);
+    border: 1px solid #D4D8E1;
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-c .c-btn-secondary:hover { border-color: var(--midnightNavy); }
+
+  .opt-c .c-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin-top: 28px;
+    background: white;
+    border: 1px solid #E4E7ED;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .opt-c .c-stat {
+    padding: 22px 24px;
+    border-right: 1px solid #E4E7ED;
+    position: relative;
+    transition: background 0.2s;
+  }
+  .opt-c .c-stat:last-child { border-right: none; }
+  .opt-c .c-stat:hover { background: #F7F8FC; }
+  .opt-c .c-stat .lbl {
+    font-size: 12px;
+    font-weight: 500;
+    color: #5A6378;
+  }
+  .opt-c .c-stat .val {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--midnightNavy);
+    margin-top: 8px;
+    letter-spacing: -1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .opt-c .c-stat .delta {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--success);
+    margin-top: 4px;
+    font-weight: 600;
+  }
+  .opt-c .c-stat .delta.flag { color: var(--warning); }
+
+  /* Mini sparkline for stat cards */
+  .opt-c .c-spark {
+    position: absolute;
+    right: 16px;
+    bottom: 14px;
+    width: 52px;
+    height: 22px;
+    opacity: 0.5;
+  }
+
+  .opt-c .c-card {
+    background: white;
+    border: 1px solid #E4E7ED;
+    border-radius: 14px;
+    padding: 26px;
+    margin-top: 20px;
+    transition: box-shadow 0.3s ease;
+  }
+  .opt-c .c-card:hover { box-shadow: 0 2px 8px rgba(33, 39, 69, 0.04); }
+  .opt-c .c-card .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 18px;
+  }
+  .opt-c .c-card h3 {
+    margin: 0 0 4px;
+    color: var(--midnightNavy);
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .opt-c .c-card .sub { margin: 0; color: #5A6378; font-size: 13px; }
+  .opt-c .c-card .empty {
+    padding: 40px;
+    background: #F7F8FC;
+    border-radius: 10px;
+    color: #5A6378;
+    font-size: 13px;
+    text-align: center;
+  }
+  .opt-c .c-card .empty strong { color: var(--success); }
+
+  .opt-c .c-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .opt-c .c-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: #5A6378;
+    padding: 10px 12px;
+    border-bottom: 1px solid #E4E7ED;
+    background: #FAFBFC;
+  }
+  .opt-c .c-table th:first-child { border-top-left-radius: 8px; }
+  .opt-c .c-table th:last-child { border-top-right-radius: 8px; }
+  .opt-c .c-table td {
+    padding: 13px 12px;
+    border-bottom: 1px solid #F0F2F6;
+    font-size: 13px;
+    color: var(--midnightNavy);
+  }
+  .opt-c .c-table tbody tr { transition: background 0.15s; }
+  .opt-c .c-table tbody tr:hover { background: #FAFBFC; }
+  .opt-c .c-table tbody tr:last-child td { border-bottom: none; }
+
+  .opt-c .c-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    background: var(--tealLight);
+    color: #0e6b52;
+    display: inline-block;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+
+  .opt-c .btn-mini-primary {
+    background: var(--midnightNavy);
+    color: white;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-c .btn-mini-primary:hover { background: #2A3155; }
+  .opt-c .btn-mini-ghost {
+    background: white;
+    color: #5A6378;
+    border: 1px solid #D4D8E1;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .opt-c .btn-mini-ghost:hover { border-color: var(--midnightNavy); color: var(--midnightNavy); }
+
+  /* ─── entrance animation for cards on tab switch ─── */
+  .stagger > *:nth-child(1) { animation: riseIn 0.5s ease 0.00s both; }
+  .stagger > *:nth-child(2) { animation: riseIn 0.5s ease 0.05s both; }
+  .stagger > *:nth-child(3) { animation: riseIn 0.5s ease 0.10s both; }
+  .stagger > *:nth-child(4) { animation: riseIn 0.5s ease 0.15s both; }
+  .stagger > *:nth-child(5) { animation: riseIn 0.5s ease 0.20s both; }
+  @keyframes riseIn {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Shared logo mark */
+  .logomark {
+    width: 28px; height: 28px;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  /* Footer note strip under each panel */
+  .note-strip {
+    max-width: 1200px;
+    margin: 30px auto 0;
+    padding: 14px 22px;
+    background: white;
+    border-radius: 12px;
+    border: 1px solid rgba(33,39,69,0.08);
+    font-size: 12px;
+    color: var(--darkGray);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .note-strip b { color: var(--midnightNavy); }
+  .note-strip .chip {
+    background: var(--tealLight);
+    color: #0e6b52;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     Chooser bar
+     ═══════════════════════════════════════════════════════════ -->
+<div class="chooser">
+  <h1><span>Stewardship.IS</span> — UI Direction Mockups · Dashboard preview</h1>
+  <div class="tab-group">
+    <button class="tab active" data-target="opt-a">Option A · Executive Glass</button>
+    <button class="tab" data-target="opt-b">Option B · Command Center</button>
+    <button class="tab" data-target="opt-c">Option C · Enterprise Confident</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     Summary / recommendation panel
+     ═══════════════════════════════════════════════════════════ -->
+<div class="summary">
+  <h2>Three directions — pick one, I'll port it into the real React app</h2>
+  <p>
+    All three options use your existing Deep Current palette (midnight navy, steel blue, electric teal) and keep every existing page, button, and data field — what changes is <b>composition, depth, shape, and motion</b>. Click the tabs above to flip between them live. My recommendation is at the bottom.
+  </p>
+  <div class="grid">
+    <div class="summary-card">
+      <div class="lbl">Option A</div>
+      <div class="name">Executive Glass</div>
+      <div class="desc">Soft gradient canvas, frosted glass cards, generous rounded corners (18px), refined hover lifts. Reads as <b>premium SaaS</b> — like Linear or Superhuman. Light mode.</div>
+    </div>
+    <div class="summary-card">
+      <div class="lbl">Option B</div>
+      <div class="name">Command Center</div>
+      <div class="desc">Dark navy canvas, glowing teal accents, live pulsing indicators, animated gradient borders. Reads as <b>operations control room</b> — Vercel-style. Dark mode by default.</div>
+    </div>
+    <div class="summary-card">
+      <div class="lbl">Option C</div>
+      <div class="name">Enterprise Confident</div>
+      <div class="desc">Crisp light mode, strong typography, big tabular numbers, mini sparklines. Reads as <b>financial-grade software</b> — Stripe/Ramp feel. Zero fluff.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     Stage — each panel is a Dashboard preview
+     ═══════════════════════════════════════════════════════════ -->
+<div class="stage">
+
+  <!-- ─────────────────────────── OPTION A ─────────────────────────── -->
+  <div class="panel active" id="opt-a">
+    <div class="opt-a">
+      <!-- Header -->
+      <div class="a-header">
+        <div style="display:flex; align-items:center;">
+          <h1>
+            <svg class="logomark" viewBox="0 0 250 250" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M207.527 130.511H122.106L126.225 115.413H211.647L207.527 130.511ZM213.159 109.868H127.737L132.091 93.9121H217.514L213.159 109.868ZM219.026 88.3672H133.604L137.956 72.4141H223.379L219.026 88.3672ZM224.892 66.8691H139.47L143.823 50.9121H229.246L224.892 66.8691ZM230.759 45.3672H145.336L149.256 31H234.679L230.759 45.3672ZM19.7654 183.199H105.188L101.423 197H16L19.7654 183.199ZM120.688 131.015H35.0777L23.1833 174.61H108.793L120.688 131.015Z" fill="#C7CCE4"/><path d="M23.1812 174.654L35.1524 130.76H121.345L108.576 174.654H23.1812Z" fill="#5DCEAF"/></svg>
+            <span class="teal">Stewardship.IS</span> <span style="color:white; font-weight:500;">Production Aggregator</span>
+          </h1>
+          <nav class="a-nav">
+            <a href="#" class="active">Dashboard</a>
+            <a href="#">Monthly Export</a>
+            <a href="#">Daily Export</a>
+            <a href="#">Export History</a>
+          </nav>
+        </div>
+        <div class="a-user">
+          <span>c@stewardship.is</span>
+          <button class="a-btn-ghost">Sign out</button>
+        </div>
+      </div>
+
+      <div class="a-main stagger">
+        <!-- Hero -->
+        <div class="a-hero">
+          <h2>Dashboard</h2>
+          <p>Live view of inbox processing, flagged imports, and stored production totals.</p>
+        </div>
+
+        <!-- Stats -->
+        <div class="a-stats">
+          <div class="a-stat">
+            <div class="lbl">Monthly rows in storage</div>
+            <div class="val">24,817</div>
+            <div class="delta">↗ 1,204 this month</div>
+          </div>
+          <div class="a-stat">
+            <div class="lbl">Daily rows in storage</div>
+            <div class="val">91,430</div>
+            <div class="delta">↗ 2,103 this week</div>
+          </div>
+          <div class="a-stat">
+            <div class="lbl">Last email received</div>
+            <div class="val">12 min ago</div>
+            <div class="delta" style="color:#1d6a89">Mewbourne · Monthly</div>
+          </div>
+          <div class="a-stat">
+            <div class="lbl">Rows flagged for review</div>
+            <div class="val" style="color: var(--warning);">3</div>
+            <div class="delta" style="color: var(--warning);">↗ needs attention</div>
+          </div>
+        </div>
+
+        <!-- Flagged imports -->
+        <div class="a-card">
+          <h3>Flagged imports needing attention</h3>
+          <p class="sub">1 recent import finished with errors.</p>
+          <table class="a-table">
+            <thead>
+              <tr>
+                <th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th><th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Apr 21, 9:14 AM</td>
+                <td>operations@btaoil.com</td>
+                <td>March_2026_Daily_Production.xlsx</td>
+                <td>3 of 4</td>
+                <td><span class="pill pill-warning"><span class="dot dot-warning"></span>Partial</span></td>
+                <td><button class="btn-teal-a">Retry Now</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Row-level rejections -->
+        <div class="a-card">
+          <h3>Row-level rejections</h3>
+          <p class="sub">No individual rows rejected by the storage-layer validator. Inbox is clean at the row level.</p>
+          <div class="empty"><strong>All clear.</strong> Every row from the last 15 imports passed API10 validation.</div>
+        </div>
+
+        <!-- Recent activity -->
+        <div class="a-card">
+          <h3>Recent email processing activity</h3>
+          <p class="sub">Most recent 20 messages delivered to the production inbox.</p>
+          <table class="a-table">
+            <thead>
+              <tr><th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Apr 21, 12:31 PM</td><td>reports@mewbourne.com</td><td>PDSWDX-MP-mewbourne-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 21, 11:02 AM</td><td>reports@eogresources.com</td><td>PDSWDX-MP-EOG-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 21, 9:14 AM</td><td>operations@btaoil.com</td><td>March_2026_Daily_Production.xlsx</td><td>3/4</td><td><span class="pill pill-warning"><span class="dot dot-warning"></span>Partial</span></td></tr>
+              <tr><td>Apr 21, 6:00 AM</td><td>frio@friothankyou.com</td><td>PDSWDX-DP-conocophillips-DAILY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 20, 8:47 PM</td><td>production@xtoenergy.com</td><td>PDSWDX-MP-XTO-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-info"><span class="dot dot-info"></span>Processing</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="note-strip">
+      <span class="chip">Option A</span>
+      <span><b>What makes it feel premium:</b> soft gradient backdrop, frosted-glass panels with depth, 18px corners, hover lift with a teal accent line, staggered fade-in on load.</span>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── OPTION B ─────────────────────────── -->
+  <div class="panel" id="opt-b">
+    <div class="opt-b">
+      <!-- Header -->
+      <div class="b-header">
+        <div style="display:flex; align-items:center;">
+          <h1>
+            <svg class="logomark" viewBox="0 0 250 250" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M207.527 130.511H122.106L126.225 115.413H211.647L207.527 130.511ZM213.159 109.868H127.737L132.091 93.9121H217.514L213.159 109.868ZM219.026 88.3672H133.604L137.956 72.4141H223.379L219.026 88.3672ZM224.892 66.8691H139.47L143.823 50.9121H229.246L224.892 66.8691ZM230.759 45.3672H145.336L149.256 31H234.679L230.759 45.3672ZM19.7654 183.199H105.188L101.423 197H16L19.7654 183.199ZM120.688 131.015H35.0777L23.1833 174.61H108.793L120.688 131.015Z" fill="#8F95B8"/><path d="M23.1812 174.654L35.1524 130.76H121.345L108.576 174.654H23.1812Z" fill="#5DCEAF"/></svg>
+            <span class="teal">Stewardship.IS</span> <span style="color:white; font-weight:500;">Production Aggregator</span>
+            <span class="live"><span class="dot-live"></span>LIVE</span>
+          </h1>
+          <nav class="b-nav">
+            <a href="#" class="active">Dashboard</a>
+            <a href="#">Monthly Export</a>
+            <a href="#">Daily Export</a>
+            <a href="#">Export History</a>
+          </nav>
+        </div>
+        <div class="b-user">
+          <span>c@stewardship.is</span>
+          <button class="b-btn-ghost">Sign out</button>
+        </div>
+      </div>
+
+      <div class="b-main stagger">
+        <!-- Hero -->
+        <div class="b-hero">
+          <h2>Operations Dashboard</h2>
+          <p>Live pipeline activity · last refresh: just now</p>
+        </div>
+
+        <!-- Stats -->
+        <div class="b-stats">
+          <div class="b-stat primary">
+            <div class="lbl"><span class="dot-live"></span>Monthly rows</div>
+            <div class="val teal">24,817</div>
+            <div class="delta">↗ +1,204 this month</div>
+          </div>
+          <div class="b-stat">
+            <div class="lbl">Daily rows</div>
+            <div class="val">91,430</div>
+            <div class="delta">↗ +2,103 this week</div>
+          </div>
+          <div class="b-stat">
+            <div class="lbl">Last email</div>
+            <div class="val" style="font-size: 22px;">12 min ago</div>
+            <div class="delta" style="color:#7ED3F3;">Mewbourne · Monthly</div>
+          </div>
+          <div class="b-stat">
+            <div class="lbl">Flagged</div>
+            <div class="val" style="color: #FFA966;">3</div>
+            <div class="delta" style="color: #FFA966;">↗ needs attention</div>
+          </div>
+        </div>
+
+        <!-- Flagged imports -->
+        <div class="b-card">
+          <div class="head">
+            <div>
+              <h3>Flagged imports needing attention</h3>
+              <p class="sub">1 recent import finished with errors.</p>
+            </div>
+            <button class="btn-ghost-b">View all</button>
+          </div>
+          <table class="b-table">
+            <thead>
+              <tr><th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Apr 21, 9:14 AM</td>
+                <td>operations@btaoil.com</td>
+                <td>March_2026_Daily_Production.xlsx</td>
+                <td>3 of 4</td>
+                <td><span class="pill pill-warning">● Partial</span></td>
+                <td><button class="btn-teal-b">Retry Now</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Row-level rejections -->
+        <div class="b-card">
+          <div class="head">
+            <div>
+              <h3>Row-level rejections</h3>
+              <p class="sub">Individual rows rejected by API10 validator.</p>
+            </div>
+          </div>
+          <div class="empty"><strong>All clear.</strong> No rejections in the last 15 imports.</div>
+        </div>
+
+        <!-- Recent activity -->
+        <div class="b-card">
+          <div class="head">
+            <div>
+              <h3>Recent email processing activity</h3>
+              <p class="sub">Last 20 messages · auto-refresh every 60s</p>
+            </div>
+            <span style="font-size: 11px; color: #8F95B8;"><span class="dot-live"></span>  Live</span>
+          </div>
+          <table class="b-table">
+            <thead>
+              <tr><th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Apr 21, 12:31 PM</td><td>reports@mewbourne.com</td><td>PDSWDX-MP-mewbourne-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success">● Completed</span></td></tr>
+              <tr><td>Apr 21, 11:02 AM</td><td>reports@eogresources.com</td><td>PDSWDX-MP-EOG-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success">● Completed</span></td></tr>
+              <tr><td>Apr 21, 9:14 AM</td><td>operations@btaoil.com</td><td>March_2026_Daily_Production.xlsx</td><td>3/4</td><td><span class="pill pill-warning">● Partial</span></td></tr>
+              <tr><td>Apr 21, 6:00 AM</td><td>frio@friothankyou.com</td><td>PDSWDX-DP-conocophillips-DAILY.pdf</td><td>1/1</td><td><span class="pill pill-success">● Completed</span></td></tr>
+              <tr><td>Apr 20, 8:47 PM</td><td>production@xtoenergy.com</td><td>PDSWDX-MP-XTO-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-info">● Processing</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="note-strip">
+      <span class="chip">Option B</span>
+      <span><b>What makes it feel operational:</b> dark navy canvas pops the teal accents, pulsing "LIVE" indicator, gradient borders on stat cards, glow on hover, tabular numerics.</span>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── OPTION C ─────────────────────────── -->
+  <div class="panel" id="opt-c">
+    <div class="opt-c">
+      <!-- Header -->
+      <div class="c-header">
+        <div style="display:flex; align-items:center;">
+          <h1>
+            <svg class="logomark" viewBox="0 0 250 250" fill="none"><path fill-rule="evenodd" clip-rule="evenodd" d="M207.527 130.511H122.106L126.225 115.413H211.647L207.527 130.511ZM213.159 109.868H127.737L132.091 93.9121H217.514L213.159 109.868ZM219.026 88.3672H133.604L137.956 72.4141H223.379L219.026 88.3672ZM224.892 66.8691H139.47L143.823 50.9121H229.246L224.892 66.8691ZM230.759 45.3672H145.336L149.256 31H234.679L230.759 45.3672ZM19.7654 183.199H105.188L101.423 197H16L19.7654 183.199ZM120.688 131.015H35.0777L23.1833 174.61H108.793L120.688 131.015Z" fill="#98A2B3"/><path d="M23.1812 174.654L35.1524 130.76H121.345L108.576 174.654H23.1812Z" fill="#5DCEAF"/></svg>
+            <span class="teal">Stewardship.IS</span>
+          </h1>
+          <span class="divider"></span>
+          <nav class="c-nav">
+            <a href="#" class="active">Dashboard</a>
+            <a href="#">Monthly Export</a>
+            <a href="#">Daily Export</a>
+            <a href="#">History</a>
+          </nav>
+        </div>
+        <div class="c-user">
+          <span>c@stewardship.is</span>
+          <div class="c-avatar">CN</div>
+        </div>
+      </div>
+
+      <div class="c-main stagger">
+        <!-- Hero -->
+        <div class="c-hero">
+          <div>
+            <h2>Dashboard</h2>
+            <p>Live view of inbox processing, flagged imports, and stored production totals.</p>
+          </div>
+          <div class="c-hero-actions">
+            <button class="c-btn-secondary">Refresh</button>
+            <button class="c-btn-primary">+ New Export</button>
+          </div>
+        </div>
+
+        <!-- Stats in a single connected row -->
+        <div class="c-stats">
+          <div class="c-stat">
+            <div class="lbl">Monthly rows in storage</div>
+            <div class="val">24,817</div>
+            <div class="delta">↗ +1,204 this month</div>
+            <svg class="c-spark" viewBox="0 0 52 22"><polyline points="0,18 8,15 16,17 24,10 32,12 40,6 52,4" fill="none" stroke="#5DCEAF" stroke-width="1.5" /></svg>
+          </div>
+          <div class="c-stat">
+            <div class="lbl">Daily rows in storage</div>
+            <div class="val">91,430</div>
+            <div class="delta">↗ +2,103 this week</div>
+            <svg class="c-spark" viewBox="0 0 52 22"><polyline points="0,14 8,12 16,15 24,10 32,11 40,7 52,5" fill="none" stroke="#5DCEAF" stroke-width="1.5" /></svg>
+          </div>
+          <div class="c-stat">
+            <div class="lbl">Last email received</div>
+            <div class="val" style="font-size: 22px; padding-top: 10px;">12 min ago</div>
+            <div class="delta" style="color:#1d6a89;">Mewbourne · Monthly</div>
+          </div>
+          <div class="c-stat">
+            <div class="lbl">Rows flagged for review</div>
+            <div class="val">3</div>
+            <div class="delta flag">⚠ needs attention</div>
+          </div>
+        </div>
+
+        <!-- Flagged imports -->
+        <div class="c-card">
+          <div class="head">
+            <div>
+              <h3>Flagged imports needing attention <span class="c-tag" style="background:#FFE6D2; color:#a24c0c;">1 item</span></h3>
+              <p class="sub">1 recent import finished with errors.</p>
+            </div>
+            <button class="btn-mini-ghost">View all</button>
+          </div>
+          <table class="c-table">
+            <thead>
+              <tr><th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Apr 21, 9:14 AM</td>
+                <td>operations@btaoil.com</td>
+                <td>March_2026_Daily_Production.xlsx</td>
+                <td>3 of 4</td>
+                <td><span class="pill pill-warning"><span class="dot dot-warning"></span>Partial</span></td>
+                <td><button class="btn-mini-primary">Retry Now</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Row-level rejections -->
+        <div class="c-card">
+          <div class="head">
+            <div>
+              <h3>Row-level rejections <span class="c-tag">clean</span></h3>
+              <p class="sub">Individual rows rejected by the storage-layer validator.</p>
+            </div>
+          </div>
+          <div class="empty"><strong>All clear.</strong> Every row from the last 15 imports passed API10 validation.</div>
+        </div>
+
+        <!-- Recent activity -->
+        <div class="c-card">
+          <div class="head">
+            <div>
+              <h3>Recent email processing activity</h3>
+              <p class="sub">Most recent 20 messages delivered to the production inbox.</p>
+            </div>
+            <button class="btn-mini-ghost">Export log</button>
+          </div>
+          <table class="c-table">
+            <thead>
+              <tr><th>Received</th><th>Sender</th><th>Subject</th><th>Attachments</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Apr 21, 12:31 PM</td><td>reports@mewbourne.com</td><td>PDSWDX-MP-mewbourne-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 21, 11:02 AM</td><td>reports@eogresources.com</td><td>PDSWDX-MP-EOG-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 21, 9:14 AM</td><td>operations@btaoil.com</td><td>March_2026_Daily_Production.xlsx</td><td>3/4</td><td><span class="pill pill-warning"><span class="dot dot-warning"></span>Partial</span></td></tr>
+              <tr><td>Apr 21, 6:00 AM</td><td>frio@friothankyou.com</td><td>PDSWDX-DP-conocophillips-DAILY.pdf</td><td>1/1</td><td><span class="pill pill-success"><span class="dot dot-success"></span>Completed</span></td></tr>
+              <tr><td>Apr 20, 8:47 PM</td><td>production@xtoenergy.com</td><td>PDSWDX-MP-XTO-MONTHLY.pdf</td><td>1/1</td><td><span class="pill pill-info"><span class="dot dot-info"></span>Processing</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="note-strip">
+      <span class="chip">Option C</span>
+      <span><b>What makes it feel enterprise-grade:</b> single connected stat bar, mini sparklines, inline status tags, tabular numerics, subtle hover on rows, primary dark-navy button.</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const panels = document.querySelectorAll('.panel');
+  tabs.forEach(t => {
+    t.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById(t.dataset.target).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+</script>
+</body>
+</html>
