@@ -202,6 +202,161 @@ async function main() {
     pass++;
   }
 
+  // ──────────────────────────────────────────────────────────────
+  // Group 3 (Task #61, 2026-04-21) — synthetic production CSVs that
+  // carry the Well Name + API 14 + Chosen ID identity triplet but ARE
+  // production data. Before Task #61 these were silently misclassified
+  // as "ComboCurve well-header export" by the catalog filter. The
+  // tightened Rule 2 (requires ≥2 catalog-only columns AND no volume
+  // columns) must let these flow through to the Generic Production CSV
+  // adapter.
+  // ──────────────────────────────────────────────────────────────
+  console.log(
+    '\n── Group 3: synthetic production CSVs with Chosen ID must PARSE (not be caught by catalog filter) ──'
+  );
+
+  // Minimal EFG-Monthly-style CSV: the identity triplet that used to
+  // trigger the old catalog Rule 2, PLUS real production-volume columns
+  // that disqualify it as a catalog, AND a sprinkle of well-name values
+  // the Generic CSV adapter will happily accept.
+  const efgMonthlyCsv = Buffer.from(
+    [
+      'Well Name,API 14,Chosen ID,Prod Date,Oil Prod,Oil Sales,Gas Prod,Gas Sales,Water Prod',
+      'EFG STATE 57-T2-42 1H,42389395160000,4238939516,2026-01-01,4521,4498,18432,17920,312',
+      'EFG STATE 57-T2-42 2H,42389395170000,4238939517,2026-01-01,5122,5100,21084,20541,287',
+      'EFG STATE 57-T2-42 1H,42389395160000,4238939516,2026-02-01,4019,3994,16210,15788,298',
+    ].join('\n'),
+    'utf-8'
+  );
+
+  // Ruthless-Dailies style CSV: daily granularity, Chosen ID present,
+  // several volume columns.
+  const ruthlessDailiesCsv = Buffer.from(
+    [
+      'Well Name,API 14,Chosen ID,Prod Date,Oil Prod,Gas Prod,Water Prod,Tubing Pressure,Casing Pressure',
+      'RUTHLESS 11 FEDERAL COM 729H,30025511740000,3002551174,3/1/2026,152,1821,45,820,540',
+      'RUTHLESS 11 FEDERAL COM 729H,30025511740000,3002551174,3/2/2026,148,1804,48,815,538',
+      'RUTHLESS 11 FEDERAL COM 729H,30025511740000,3002551174,3/3/2026,151,1812,46,818,542',
+    ].join('\n'),
+    'utf-8'
+  );
+
+  // A file that HAS a partial catalog-style shape (one catalog-only column)
+  // but ALSO a production-volume column. Must NOT be caught — the volume
+  // column is the disqualifier, even though "INPT ID" is a catalog signal.
+  const ambiguousWithVolumeCsv = Buffer.from(
+    [
+      'Well Name,API 14,Chosen ID,INPT ID,Prod Date,Oil Prod',
+      'ARLO COUNTRY 45-09B 2DN,42115340770000,4211534077,INPTabcd123,2026-03-15,77',
+    ].join('\n'),
+    'utf-8'
+  );
+
+  const syntheticCases: Array<{
+    filename: string;
+    buffer: Buffer;
+    expectedFormat: string;
+    description: string;
+  }> = [
+    {
+      filename: '2026.03.20 EFG Monthly Production.csv',
+      buffer: efgMonthlyCsv,
+      expectedFormat: 'Generic Production CSV',
+      description:
+        'EFG Monthly carries Well Name + API 14 + Chosen ID + volume columns — must parse',
+    },
+    {
+      filename: '2026.04.07 Ruthless Dailies Production.csv',
+      buffer: ruthlessDailiesCsv,
+      expectedFormat: 'Generic Production CSV',
+      description:
+        'Ruthless Dailies carries Well Name + API 14 + Chosen ID + volume columns — must parse',
+    },
+    {
+      filename: 'ambiguous-with-volume.csv',
+      buffer: ambiguousWithVolumeCsv,
+      expectedFormat: 'Generic Production CSV',
+      description:
+        'Volume column disqualifies catalog even when one catalog-only column (INPT ID) is present',
+    },
+  ];
+
+  for (const c of syntheticCases) {
+    const outcome = await dispatchParser(
+      { filename: c.filename, mimeType: 'text/csv', data: c.buffer } as any,
+      'test@example.com'
+    );
+
+    if (outcome.kind === 'ignored') {
+      console.log(
+        `[FAIL] ${c.filename}: incorrectly ignored by "${outcome.filterName}" (${outcome.category}). ` +
+          `${c.description}`
+      );
+      console.log(`       reason: ${outcome.reason}`);
+      fail++;
+      continue;
+    }
+    if (outcome.kind !== 'parsed') {
+      console.log(
+        `[FAIL] ${c.filename}: expected kind="parsed" but got "${outcome.kind}"`
+      );
+      if (outcome.kind === 'error') console.log(`       error: ${outcome.message}`);
+      if (outcome.kind === 'unrecognized') console.log(`       reason: ${outcome.reason}`);
+      fail++;
+      continue;
+    }
+    if (outcome.formatName !== c.expectedFormat) {
+      console.log(
+        `[FAIL] ${c.filename}: routed to "${outcome.formatName}", expected "${c.expectedFormat}"`
+      );
+      fail++;
+      continue;
+    }
+    console.log(
+      `[PASS] ${c.filename}  format="${outcome.formatName}"  records=${outcome.records.length}`
+    );
+    console.log(`       — ${c.description}`);
+    pass++;
+  }
+
+  // Synthetic inverse: a minimal "fake catalog" CSV with no filename match
+  // but with the full identity triplet + several catalog-only columns and
+  // NO production volumes. Rule 2 must still catch this.
+  console.log(
+    '\n── Group 4: synthetic catalog CSV (no filename match) must still be IGNORED by Rule 2 ──'
+  );
+  const syntheticCatalogCsv = Buffer.from(
+    [
+      'Well Name,API 14,Chosen ID,Chosen ID Key,INPT ID,Has Monthly Data,Scope',
+      'EXAMPLE WELL 1H,42001000010000,4200100001,API_UWI,INPTabc1,True,Project',
+    ].join('\n'),
+    'utf-8'
+  );
+  {
+    const outcome = await dispatchParser(
+      {
+        filename: 'some-reasonably-named.csv',
+        mimeType: 'text/csv',
+        data: syntheticCatalogCsv,
+      } as any,
+      'test@example.com'
+    );
+    if (outcome.kind === 'ignored' && outcome.filterName === 'combocurve-well-catalog') {
+      console.log(
+        `[PASS] synthetic catalog (no filename match)  filter=${outcome.filterName}  category="${outcome.category}"`
+      );
+      console.log(`       reason: ${outcome.reason}`);
+      pass++;
+    } else {
+      console.log(
+        `[FAIL] synthetic catalog (no filename match): expected filter=combocurve-well-catalog, got kind=${outcome.kind}`
+      );
+      if (outcome.kind === 'ignored') console.log(`       filter=${outcome.filterName}`);
+      if (outcome.kind === 'parsed') console.log(`       routed to "${outcome.formatName}"`);
+      fail++;
+    }
+  }
+
   console.log(`\n── Summary: ${pass} passed, ${fail} failed ──`);
   if (fail > 0) process.exit(1);
 }

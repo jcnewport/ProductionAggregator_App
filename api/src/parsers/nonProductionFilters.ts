@@ -144,16 +144,118 @@ const ourOwnTestExport: NonProductionFilter = {
  * Detection strategy (belt & suspenders):
  *   1. Filename matches /^well_.*_\d{14}\.csv$/i  (the ComboCurve export
  *      naming convention), OR
- *   2. The CSV's first row contains the distinctive ComboCurve catalog
- *      headers "Well Name" + "API 14" + "Chosen ID" (a combination no
- *      operator production file uses).
+ *   2. Tightened header signature (Task #61, 2026-04-21): it is NOT enough
+ *      that the row contains "Well Name" + "API 14" + "Chosen ID" — real
+ *      operator production CSVs (EFG Monthly, Ruthless Dailies, etc.) also
+ *      carry those three columns because operators increasingly include
+ *      Chosen ID as a cross-reference. To avoid eating production files,
+ *      Rule 2 now requires ALL of:
+ *        a) the identity triplet ("Well Name" + "API 14" + "Chosen ID"), AND
+ *        b) NO production-volume columns (oil prod, gas prod, water prod,
+ *           oil sales, gas sales, …) — a catalog has metadata, never volumes, AND
+ *        c) at least TWO catalog-distinctive metadata columns from
+ *           CATALOG_ONLY_HEADERS (things like "Chosen ID Key", "Has Monthly
+ *           Data", "INPT ID", "Cum BOE", "Scope", etc. — columns a
+ *           production CSV would NEVER carry).
+ *
+ * Why this matters (the bug this fixed): prior to Task #61 the three-header
+ * Rule 2 was eating the Frio email's EFG Monthly, EFG State Daily, and
+ * Ruthless Dailies Production CSVs. They were silently marked "ignored" on
+ * the dashboard and never parsed. The real catalog still carries the full
+ * metadata column set, so Rule 2 still catches it cleanly.
  */
+
+/**
+ * Headers that appear in a ComboCurve catalog export but NEVER in an
+ * operator production CSV. Normalized per `normalizeCell` (lowercased).
+ * Any TWO of these present → very strong evidence this is a catalog.
+ */
+const CATALOG_ONLY_HEADERS: readonly string[] = [
+  'chosen id key',
+  'assigned well collection',
+  'has monthly data',
+  'has daily data',
+  'inpt id',
+  'aries id',
+  'phdwin id',
+  'first prod date monthly',
+  'first prod date daily',
+  'last prod date monthly',
+  'last prod date daily',
+  'perf lateral length',
+  'lateral length',
+  'landing zone',
+  'type curve area',
+  'recovery method',
+  'cum boe',
+  'cum oil',
+  'cum gas',
+  'cum water',
+  'first 12 boe',
+  'first 6 boe',
+  'last 12 boe',
+  'last month boe',
+  'prms reserves category',
+  'prms reserves sub category',
+  'data pool',
+  'data source',
+  'scope',
+  'surface latitude',
+  'surface longitude',
+  'heel latitude',
+  'toe latitude',
+  'formation thickness mean',
+  'gas specific gravity',
+  'oil api gravity',
+  'custom string 1',
+  'custom string 0',
+  'custom number 0',
+  'custom date 0',
+];
+
+/**
+ * Production-volume column headers. If ANY of these appear in the header
+ * row, the file is production data — not a catalog — even if the row also
+ * happens to include the Well Name / API 14 / Chosen ID identity triplet.
+ */
+const PRODUCTION_VOLUME_HEADERS: readonly string[] = [
+  'oil prod',
+  'oilprod',
+  'oil production',
+  'gas prod',
+  'gasprod',
+  'gas production',
+  'water prod',
+  'waterprod',
+  'water production',
+  'oil sales',
+  'oilsales',
+  'oil sold',
+  'gas sales',
+  'gassales',
+  'gas sold',
+  'alloc oil',
+  'alloc gas',
+  'alloc wat',
+  'alloc water',
+  'new prod oil',
+  'new prod gas',
+  'total oil',
+  'total gas',
+  'total water',
+  'gross oil',
+  'gross gas',
+  'bopd',
+  'mcfpd',
+  'bwpd',
+];
+
 const combocurveWellCatalog: NonProductionFilter = {
   name: 'combocurve-well-catalog',
   category: 'well catalog / reference export',
   fileKinds: ['csv', 'xlsx', 'xls'],
   detect(ctx: ParserContext): string | null {
-    // Rule 1: filename signature
+    // Rule 1: filename signature — very specific, real catalogs match this.
     const fname = ctx.filename.toLowerCase();
     if (/^well_.*_\d{14}\.(csv|xlsx|xls)$/i.test(fname)) {
       return (
@@ -162,22 +264,48 @@ const combocurveWellCatalog: NonProductionFilter = {
       );
     }
 
-    // Rule 2: header signature — look at the first non-empty preview row
+    // Rule 2: tightened header signature — see header comment above.
     const preview = ctx.sheetPreview;
     if (!preview || preview.length === 0) return null;
+
     for (let i = 0; i < Math.min(preview.length, 3); i++) {
       const row = preview[i];
       if (!row || row.length === 0) continue;
       const cells = row.map(normalizeCell);
-      const hasWellName = cells.includes('well name');
-      const hasApi14 = cells.includes('api 14');
-      const hasChosenId = cells.includes('chosen id');
-      if (hasWellName && hasApi14 && hasChosenId) {
+
+      // (a) identity triplet
+      const hasIdentity =
+        cells.includes('well name') &&
+        cells.includes('api 14') &&
+        cells.includes('chosen id');
+      if (!hasIdentity) continue;
+
+      // (b) disqualifier: any production-volume column present → this is
+      //     production data carrying Chosen ID as a cross-reference. Let
+      //     the FormatAdapter chain handle it.
+      const volumeHits = PRODUCTION_VOLUME_HEADERS.filter((h) => cells.includes(h));
+      if (volumeHits.length > 0) {
+        return null;
+      }
+
+      // (c) positive: require >= 2 catalog-only columns to confirm.
+      const catalogHits = CATALOG_ONLY_HEADERS.filter((h) => cells.includes(h));
+      if (catalogHits.length >= 2) {
+        // Show up to 3 of the matched signature columns in the reason so
+        // the dashboard makes it obvious why we called this a catalog.
+        const sample = catalogHits.slice(0, 3).join(', ');
         return (
-          'ComboCurve well-header export (headers include "Well Name", "API 14", "Chosen ID" — ' +
-          'a signature unique to the ComboCurve catalog, not an operator production report)'
+          'ComboCurve well-header export (headers include "Well Name", "API 14", "Chosen ID" ' +
+          `plus ${catalogHits.length} catalog-only metadata columns: ${sample}${
+            catalogHits.length > 3 ? ', …' : ''
+          } — no production-volume columns present)`
         );
       }
+      // Identity triplet present but fewer than 2 catalog-only columns and
+      // no production volumes — ambiguous. Don't claim it; let the registry
+      // try to parse it. If no adapter matches it'll land in "unrecognized"
+      // for manual review, which is the right outcome for ambiguous files.
+      return null;
     }
     return null;
   },
