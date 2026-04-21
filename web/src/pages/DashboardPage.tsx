@@ -334,9 +334,17 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     setBusy(true);
     setLocalErr(null);
     try {
+      // Attach the Supabase session token so /api/admin's requireAuth
+      // middleware (Task #78) accepts the request.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? '';
+
       const resp = await fetch('/api/admin/retry-now', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ emailLogId: row.id }),
       });
       const json = await resp.json();

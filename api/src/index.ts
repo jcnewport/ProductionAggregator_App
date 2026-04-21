@@ -11,6 +11,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -20,6 +21,12 @@ import exportsRouter from './routes/exports.js';
 import exportHistoryRouter from './routes/exportHistory.js';
 import adminRouter from './routes/admin.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
+import {
+  adminLimiter,
+  buildCorsOptions,
+  globalLimiter,
+  requireAuthMaybe,
+} from './middleware/security.js';
 
 // Load environment variables
 dotenv.config();
@@ -27,8 +34,32 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors());
+// ─── Security + parsing middleware ───────────────────────────────
+// Order matters — we set security headers and rate limits BEFORE
+// any business logic runs, so even a bad-request path still gets
+// the protection.
+//
+// 1. helmet       → sets a bundle of well-known security headers
+//                    (X-Content-Type-Options, Referrer-Policy, etc.)
+// 2. cors         → allowlisted origins only (see middleware/security.ts)
+// 3. globalLimiter → generous per-IP rate limit on every route
+// 4. express.json → parse JSON bodies (req.body)
+//
+// helmet's default CSP is strict enough to block Vite's production
+// bundle (it uses inline styles). Disabling contentSecurityPolicy here
+// keeps the SPA rendering while still leaving the other protections on.
+// A future hardening pass can introduce a custom CSP if we want one.
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    // Don't force HSTS in dev — Railway already terminates HTTPS and
+    // sets HSTS at the edge. Explicitly disabling avoids surprises if
+    // someone runs the API on plain-HTTP locally.
+    strictTransportSecurity: false,
+  })
+);
+app.use(cors(buildCorsOptions()));
+app.use(globalLimiter);
 app.use(express.json());
 
 // Health check endpoint
@@ -63,10 +94,19 @@ app.use('/api/export', exportsRouter);
 //   GET /api/exports/:id/download        — 302 redirect to signed URL
 app.use('/api/exports', exportHistoryRouter);
 
-// Admin operations — reprocess failed emails, etc.
+// Admin operations — reprocess failed emails, retry passes, alert sends.
 //   POST /api/admin/reprocess-email     { emailLogId?, gmailMessageId? }
 //   POST /api/admin/reprocess-failed    { statuses?, limit? }
-app.use('/api/admin', adminRouter);
+//   POST /api/admin/retry-now           { emailLogId }
+//   POST /api/admin/retry-pass          { max? }
+//   POST /api/admin/send-alert          { emailLogId, force? }
+//   GET  /api/admin/retries-due         ?limit=
+//
+// Gated by:
+//   • adminLimiter  — tighter rate ceiling (30 req / 15 min / IP)
+//   • requireAuth   — valid Supabase Bearer token required
+//     (bypass with ADMIN_AUTH_DISABLED=true for local debugging only)
+app.use('/api/admin', adminLimiter, requireAuthMaybe(), adminRouter);
 
 // Flagged records — rows rejected by storage-layer validators
 //   GET /api/flagged-records?limit=50&since=YYYY-MM-DD
