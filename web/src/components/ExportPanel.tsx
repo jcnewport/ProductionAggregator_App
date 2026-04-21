@@ -1,27 +1,27 @@
 /**
  * ExportPanel — shared UI for both Monthly and Daily export pages.
  *
+ * UI direction (2026-04-21): same "Enterprise Confident" card + button tokens
+ * used across the app. Primary CTA is dark-navy (not blue) to match the
+ * rest of the chrome; teal is reserved for brand accents like the help-
+ * callout's left border and inline status chips.
+ *
  * Props control the differences:
  *   - inputType: "month" (YYYY-MM) vs "date" (YYYY-MM-DD)
  *   - apiPath:   "/api/export/monthly" or "/api/export/daily"
  *   - helpText:  explanation shown under the header
  *
- * The download flow:
+ * The download flow is unchanged:
  *   1. User picks start + end dates/months
  *   2. Optional operator filter (single-select for now)
  *   3. Click "Generate & Download"
- *   4. We hit the API with the user's session's JWT (via fetch + Supabase access token)
+ *   4. We hit the API with the user's session's JWT
  *   5. API streams back the XLSX; we trigger a browser download
- *
- * Why fetch + manual download (instead of a simple <a href>):
- *   - The API expects an Authorization header (future-ready for auth-gated exports)
- *   - We can show loading state, row/well count from response headers, and
- *     surface error JSON gracefully
  */
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../utils/supabase';
-import { colors, shadows } from '../theme';
+import { colors, shadows, radii } from '../theme';
 
 interface ExportPanelProps {
   pageTitle: string;
@@ -90,13 +90,10 @@ export default function ExportPanel({
     setSubmitting(true);
 
     try {
-      // Build the URL with query params
       const params = new URLSearchParams({ start, end });
       if (operatorId) params.append('operator_id', operatorId);
       const url = `${apiPath}?${params.toString()}`;
 
-      // Get the current session for the Authorization header. If the API later
-      // enforces JWT, this Just Works. Today it's permissive but harmless.
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token ?? '';
 
@@ -105,7 +102,6 @@ export default function ExportPanel({
       });
 
       if (!res.ok) {
-        // The API returns JSON error bodies. Try to parse, fall back to text.
         const ct = res.headers.get('content-type') ?? '';
         if (ct.includes('application/json')) {
           const j = await res.json();
@@ -115,14 +111,12 @@ export default function ExportPanel({
         throw new Error(t.slice(0, 300) || `Request failed (HTTP ${res.status})`);
       }
 
-      // Pull counts from response headers (set by api/src/routes/exports.ts)
       const rowCount = parseInt(res.headers.get('X-Export-Row-Count') ?? '0', 10) || 0;
       const wellCount = parseInt(res.headers.get('X-Export-Well-Count') ?? '0', 10) || 0;
       const disposition = res.headers.get('Content-Disposition') ?? '';
       const filenameMatch = /filename="?([^";]+)"?/.exec(disposition);
       const filename = filenameMatch?.[1] ?? 'ComboCurve_Export.xlsx';
 
-      // Trigger the browser download
       const blob = await res.blob();
       const objectUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -142,18 +136,30 @@ export default function ExportPanel({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="sis-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div>
-        <h2 style={{ margin: 0, color: colors.midnightNavy, fontSize: '22px', fontWeight: 700 }}>{pageTitle}</h2>
-        <p style={{ margin: '4px 0 0 0', color: colors.darkGray, fontSize: '14px' }}>{pageSubtitle}</p>
+        <h2
+          style={{
+            margin: 0,
+            color: colors.midnightNavy,
+            fontSize: '28px',
+            fontWeight: 700,
+            letterSpacing: '-0.5px',
+          }}
+        >
+          {pageTitle}
+        </h2>
+        <p style={{ margin: '6px 0 0 0', color: colors.textMuted, fontSize: '14px' }}>{pageSubtitle}</p>
       </div>
 
       <form
         onSubmit={onSubmit}
+        className="sis-hover-lift"
         style={{
-          backgroundColor: colors.white,
-          borderRadius: '8px',
-          padding: '22px',
+          backgroundColor: colors.surface,
+          border: `1px solid ${colors.borderCard}`,
+          borderRadius: radii.xl,
+          padding: '26px',
           boxShadow: shadows.card,
           display: 'flex',
           flexDirection: 'column',
@@ -169,7 +175,7 @@ export default function ExportPanel({
               value={start}
               onChange={(e) => setStart(e.target.value)}
               placeholder={startPlaceholder}
-              style={inputStyle}
+              className="sis-input"
             />
           </label>
           <label style={labelStyle}>
@@ -180,7 +186,7 @@ export default function ExportPanel({
               value={end}
               onChange={(e) => setEnd(e.target.value)}
               placeholder={endPlaceholder}
-              style={inputStyle}
+              className="sis-input"
             />
           </label>
         </div>
@@ -190,7 +196,8 @@ export default function ExportPanel({
           <select
             value={operatorId}
             onChange={(e) => setOperatorId(e.target.value)}
-            style={{ ...inputStyle, backgroundColor: colors.white }}
+            className="sis-input"
+            style={{ backgroundColor: colors.surface }}
           >
             <option value="">All operators</option>
             {operators.map((op) => (
@@ -204,20 +211,8 @@ export default function ExportPanel({
         <button
           type="submit"
           disabled={submitting}
-          style={{
-            alignSelf: 'flex-start',
-            // CTA color = primary blue (matches the Sign-in button on Login).
-            // Teal is reserved for brand accents like the help-callout border
-            // and the logo mark — not for action buttons.
-            backgroundColor: submitting ? colors.darkGray : colors.primary,
-            color: colors.white,
-            border: 'none',
-            padding: '11px 22px',
-            borderRadius: '6px',
-            fontSize: '14px',
-            fontWeight: 600,
-            cursor: submitting ? 'wait' : 'pointer',
-          }}
+          className="sis-btn sis-btn-primary"
+          style={{ alignSelf: 'flex-start' }}
         >
           {submitting ? 'Generating…' : 'Generate & Download'}
         </button>
@@ -226,10 +221,10 @@ export default function ExportPanel({
       {error && (
         <div
           style={{
-            backgroundColor: '#FEF2F2',
+            backgroundColor: colors.dangerBg,
             color: colors.danger,
             border: `1px solid ${colors.danger}33`,
-            borderRadius: '6px',
+            borderRadius: radii.lg,
             padding: '12px 14px',
             fontSize: '13px',
           }}
@@ -241,28 +236,29 @@ export default function ExportPanel({
       {result && (
         <div
           style={{
-            backgroundColor: `${colors.success}18`,
+            backgroundColor: colors.successBg,
             color: colors.midnightNavy,
             border: `1px solid ${colors.success}55`,
-            borderRadius: '6px',
+            borderRadius: radii.lg,
             padding: '12px 14px',
             fontSize: '13px',
-            lineHeight: 1.5,
+            lineHeight: 1.55,
           }}
         >
-          <strong>Download started.</strong> {result.filename} —{' '}
+          <strong style={{ color: colors.success }}>Download started.</strong> {result.filename} —{' '}
           {result.rowCount.toLocaleString()} rows across {result.wellCount.toLocaleString()} wells.
         </div>
       )}
 
       <div
         style={{
-          backgroundColor: colors.lightGray,
+          backgroundColor: colors.tealLight,
           borderLeft: `3px solid ${colors.electricTeal}`,
           padding: '14px 16px',
           fontSize: '13px',
           color: colors.midnightNavy,
-          lineHeight: 1.55,
+          lineHeight: 1.6,
+          borderRadius: `0 ${radii.md} ${radii.md} 0`,
         }}
       >
         {helpText}
@@ -271,7 +267,7 @@ export default function ExportPanel({
   );
 }
 
-/* Shared input styles ---------------------------------------------------- */
+/* Shared label styles ---------------------------------------------------- */
 
 const labelStyle: React.CSSProperties = {
   display: 'flex',
@@ -282,14 +278,5 @@ const labelStyle: React.CSSProperties = {
 const labelTextStyle: React.CSSProperties = {
   fontSize: '13px',
   color: colors.midnightNavy,
-  fontWeight: 500,
-};
-
-const inputStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  borderRadius: '6px',
-  border: `1px solid ${colors.mediumGray}`,
-  fontSize: '14px',
-  fontFamily: 'inherit',
-  outline: 'none',
+  fontWeight: 600,
 };

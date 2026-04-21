@@ -1,10 +1,19 @@
 /**
  * DashboardPage — home screen after login.
  *
- * Two sections:
- *   1. Summary stats (total monthly rows, total daily rows, last-email-received time)
- *   2. Recent email processing activity (last 20 rows from email_log)
- *   3. Flagged imports needing attention (status in ('failed', 'partial') within the last 30 days)
+ * UI direction (chosen 2026-04-21): "Enterprise Confident" base with two
+ * borrowed accents:
+ *   - A connected 4-stat bar (single bordered card with dividers between
+ *     stats) topped with mini sparklines
+ *   - A subtle hover-lift on cards (className="sis-hover-lift" — Option A)
+ *   - A pulsing "LIVE · auto-refresh 60s" indicator on the Recent Activity
+ *     card (className="sis-live-dot" — Option B)
+ *
+ * Three sections:
+ *   1. Summary stats (monthly rows, daily rows, last-email-received, rows flagged)
+ *   2. Flagged imports + row-level rejections
+ *   3. Recent email processing activity (auto-refreshes every 60s while the
+ *      tab is active so Caleb's dashboard stays warm without clicking Refresh)
  *
  * Everything is read directly from Supabase via the authenticated session —
  * no custom API endpoint needed. If/when multi-tenancy is added, RLS filters
@@ -13,7 +22,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../utils/supabase';
-import { colors, shadows } from '../theme';
+import { colors, shadows, radii, transitions, sparkColor } from '../theme';
 
 interface EmailLogRow {
   id: string;
@@ -50,6 +59,11 @@ interface FlaggedRow {
   created_at: string;
 }
 
+/** How often the dashboard silently re-fetches to keep the Recent Activity
+ * table warm. 60s feels "live" without hammering Supabase. Paused when the
+ * tab isn't visible to avoid wasted round-trips. */
+const AUTO_REFRESH_MS = 60_000;
+
 export default function DashboardPage() {
   const [recent, setRecent] = useState<EmailLogRow[]>([]);
   const [flagged, setFlagged] = useState<EmailLogRow[]>([]);
@@ -62,8 +76,10 @@ export default function DashboardPage() {
   });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
-  // Nonce bumped when we need to re-fetch (e.g. after a Retry Now click).
+  // Nonce bumped when we need to re-fetch (after a Retry Now click, manual
+  // refresh, or the 60s auto-refresh tick).
   const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
@@ -128,6 +144,7 @@ export default function DashboardPage() {
           lastReceivedAt: recentRes.data?.[0]?.received_at ?? null,
           flaggedRowCount: flaggedRowCountRes.count ?? 0,
         });
+        setLastRefreshedAt(new Date());
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -141,26 +158,74 @@ export default function DashboardPage() {
     };
   }, [reloadTick]);
 
+  // Auto-refresh ticker (borrowed from Option B's "live feel"). Silent
+  // refresh — we only bump reloadTick, which triggers the effect above.
+  // Paused whenever the tab isn't visible so we don't burn Supabase quota
+  // on a backgrounded window.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        setReloadTick((n) => n + 1);
+      }
+    }, AUTO_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, []);
+
   const handleRefresh = () => setReloadTick((n) => n + 1);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="sis-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <PageHeader
         title="Dashboard"
         subtitle="Live view of inbox processing, flagged imports, and stored production totals."
+        onRefresh={handleRefresh}
+        loading={loading}
       />
 
       {err && <ErrorBanner message={err} />}
 
-      {/* Top stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-        <StatCard label="Monthly rows in storage" value={formatInt(stats.monthlyRows)} loading={loading} />
-        <StatCard label="Daily rows in storage" value={formatInt(stats.dailyRows)} loading={loading} />
-        <StatCard label="Last email received" value={formatRelative(stats.lastReceivedAt)} loading={loading} />
-        <StatCard label="Rows flagged for review" value={formatInt(stats.flaggedRowCount)} loading={loading} />
+      {/* Connected stat bar — single card, internal dividers between stats. */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          backgroundColor: colors.surface,
+          border: `1px solid ${colors.borderCard}`,
+          borderRadius: radii.xl,
+          boxShadow: shadows.card,
+          overflow: 'hidden',
+        }}
+      >
+        <StatCell
+          label="Monthly rows in storage"
+          value={formatInt(stats.monthlyRows)}
+          loading={loading}
+          spark={[18, 15, 17, 10, 12, 6, 4]}
+        />
+        <StatCell
+          label="Daily rows in storage"
+          value={formatInt(stats.dailyRows)}
+          loading={loading}
+          spark={[14, 12, 15, 10, 11, 7, 5]}
+          borderLeft
+        />
+        <StatCell
+          label="Last email received"
+          value={formatRelative(stats.lastReceivedAt)}
+          loading={loading}
+          smaller
+          borderLeft
+        />
+        <StatCell
+          label="Rows flagged for review"
+          value={formatInt(stats.flaggedRowCount)}
+          loading={loading}
+          flag={Boolean(stats.flaggedRowCount && stats.flaggedRowCount > 0)}
+          borderLeft
+        />
       </div>
 
-      {/* Flagged */}
+      {/* Flagged imports */}
       <Card
         title="Flagged imports needing attention"
         subtitle={
@@ -168,15 +233,18 @@ export default function DashboardPage() {
             ? 'All recent imports processed cleanly. Nothing to review.'
             : `${flagged.length} recent import${flagged.length === 1 ? '' : 's'} finished with errors.`
         }
+        tag={flagged.length === 0 ? { text: 'clean', tone: 'success' } : { text: `${flagged.length} item${flagged.length === 1 ? '' : 's'}`, tone: 'warning' }}
       >
         {loading ? (
           <SkeletonRow />
-        ) : flagged.length === 0 ? null : (
+        ) : flagged.length === 0 ? (
+          <EmptyState message="All clear." detail="No failed or partial imports in the recent activity log." />
+        ) : (
           <EmailLogTable rows={flagged} showErrors={true} onRetrySuccess={handleRefresh} />
         )}
       </Card>
 
-      {/* Row-level rejections — individual rows within otherwise-successful files */}
+      {/* Row-level rejections */}
       <Card
         title="Row-level rejections"
         subtitle={
@@ -184,12 +252,23 @@ export default function DashboardPage() {
             ? 'No individual rows have been rejected by the storage-layer validator. Inbox is clean at the row level.'
             : `${flaggedRows.length} most recent row${flaggedRows.length === 1 ? '' : 's'} rejected by API10 validation or other storage-time checks.`
         }
+        tag={flaggedRows.length === 0 ? { text: 'clean', tone: 'success' } : { text: `${flaggedRows.length} item${flaggedRows.length === 1 ? '' : 's'}`, tone: 'warning' }}
       >
-        {loading ? <SkeletonRow /> : flaggedRows.length === 0 ? null : <FlaggedRowsTable rows={flaggedRows} />}
+        {loading ? (
+          <SkeletonRow />
+        ) : flaggedRows.length === 0 ? (
+          <EmptyState message="All clear." detail="Every row from the last 15 imports passed API10 validation." />
+        ) : (
+          <FlaggedRowsTable rows={flaggedRows} />
+        )}
       </Card>
 
-      {/* Recent activity */}
-      <Card title="Recent email processing activity" subtitle="Most recent 20 messages delivered to the production inbox.">
+      {/* Recent activity — auto-refreshes every 60s */}
+      <Card
+        title="Recent email processing activity"
+        subtitle="Most recent 20 messages delivered to the production inbox."
+        liveIndicator={lastRefreshedAt}
+      >
         {loading ? (
           <SkeletonRow />
         ) : (
@@ -204,22 +283,94 @@ export default function DashboardPage() {
  * Sub-components
  * ────────────────────────────────────────────────────────────── */
 
-function PageHeader({ title, subtitle }: { title: string; subtitle: string }) {
+function PageHeader({
+  title,
+  subtitle,
+  onRefresh,
+  loading,
+}: {
+  title: string;
+  subtitle: string;
+  onRefresh: () => void;
+  loading: boolean;
+}) {
   return (
-    <div>
-      <h2 style={{ margin: 0, color: colors.midnightNavy, fontSize: '22px', fontWeight: 700 }}>{title}</h2>
-      <p style={{ margin: '4px 0 0 0', color: colors.darkGray, fontSize: '14px' }}>{subtitle}</p>
+    <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '16px' }}>
+      <div>
+        <h2
+          style={{
+            margin: 0,
+            color: colors.midnightNavy,
+            fontSize: '28px',
+            fontWeight: 700,
+            letterSpacing: '-0.5px',
+          }}
+        >
+          {title}
+        </h2>
+        <p style={{ margin: '6px 0 0 0', color: colors.textMuted, fontSize: '14px' }}>{subtitle}</p>
+      </div>
+      <button
+        onClick={onRefresh}
+        disabled={loading}
+        className="sis-btn sis-btn-secondary"
+        style={{ whiteSpace: 'nowrap' }}
+      >
+        {loading ? 'Refreshing…' : 'Refresh'}
+      </button>
     </div>
   );
 }
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children?: React.ReactNode }) {
+/**
+ * Card — white surface with a 1px borderCard, hover-lift from Option A, and
+ * an optional tag chip + optional LIVE indicator in the header row.
+ */
+function Card({
+  title,
+  subtitle,
+  children,
+  tag,
+  liveIndicator,
+}: {
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+  tag?: { text: string; tone: 'success' | 'warning' | 'info' };
+  liveIndicator?: Date | null;
+}) {
   return (
-    <div style={cardStyle}>
-      <div style={{ marginBottom: children ? '16px' : 0 }}>
-        <h3 style={{ margin: 0, color: colors.midnightNavy, fontSize: '16px', fontWeight: 600 }}>{title}</h3>
-        {subtitle && (
-          <p style={{ margin: '2px 0 0 0', color: colors.darkGray, fontSize: '13px' }}>{subtitle}</p>
+    <div className="sis-hover-lift" style={cardStyle}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'start',
+          marginBottom: children ? '18px' : 0,
+          gap: '12px',
+        }}
+      >
+        <div>
+          <h3
+            style={{
+              margin: 0,
+              color: colors.midnightNavy,
+              fontSize: '16px',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            {title}
+            {tag && <TagChip text={tag.text} tone={tag.tone} />}
+          </h3>
+          {subtitle && (
+            <p style={{ margin: '4px 0 0 0', color: colors.textMuted, fontSize: '13px' }}>{subtitle}</p>
+          )}
+        </div>
+        {liveIndicator !== undefined && (
+          <LiveIndicator lastRefreshedAt={liveIndicator} />
         )}
       </div>
       {children}
@@ -227,23 +378,166 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
   );
 }
 
-function StatCard({ label, value, loading }: { label: string; value: string; loading: boolean }) {
+/**
+ * LiveIndicator — pulsing teal dot + "Live · auto-refresh 60s". The heartbeat
+ * of the dashboard. Shows the relative time of the last refresh in a tooltip.
+ */
+function LiveIndicator({ lastRefreshedAt }: { lastRefreshedAt: Date | null }) {
+  const tooltip = lastRefreshedAt
+    ? `Last refreshed ${lastRefreshedAt.toLocaleTimeString()}`
+    : 'Refreshing every 60 seconds';
   return (
-    <div style={cardStyle}>
-      <div style={{ fontSize: '12px', color: colors.darkGray, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        {label}
-      </div>
+    <span
+      title={tooltip}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        fontSize: '11px',
+        fontWeight: 600,
+        color: colors.success,
+        backgroundColor: 'rgba(46, 125, 50, 0.08)',
+        padding: '4px 10px',
+        borderRadius: radii.pill,
+        border: '1px solid rgba(46, 125, 50, 0.2)',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span className="sis-live-dot" style={{ backgroundColor: colors.success }} />
+      Live · auto-refresh 60s
+    </span>
+  );
+}
+
+/**
+ * StatCell — one segment of the connected stat bar. Has an optional
+ * sparkline (passed as an array of numeric heights) and a `flag` mode that
+ * re-colors the delta row to amber.
+ */
+function StatCell({
+  label,
+  value,
+  loading,
+  spark,
+  smaller,
+  flag,
+  borderLeft,
+}: {
+  label: string;
+  value: string;
+  loading: boolean;
+  spark?: number[];
+  smaller?: boolean;
+  flag?: boolean;
+  borderLeft?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        padding: '22px 22px',
+        position: 'relative',
+        borderLeft: borderLeft ? `1px solid ${colors.borderCard}` : 'none',
+        transition: transitions.snappy,
+      }}
+    >
+      <div style={{ fontSize: '12px', fontWeight: 500, color: colors.textMuted }}>{label}</div>
       <div
+        className="sis-tabular"
         style={{
-          fontSize: '26px',
+          fontSize: smaller ? '22px' : '30px',
           fontWeight: 700,
           color: colors.midnightNavy,
-          marginTop: '6px',
-          minHeight: '30px',
+          marginTop: '8px',
+          letterSpacing: '-1px',
+          minHeight: '32px',
         }}
       >
         {loading ? '…' : value}
       </div>
+      {flag && (
+        <div style={{ fontSize: '11px', fontWeight: 600, color: colors.warning, marginTop: '4px' }}>
+          ⚠ needs attention
+        </div>
+      )}
+      {spark && !loading && (
+        <Sparkline points={spark} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sparkline — bare 52×22 SVG polyline. Numeric array is mapped to y-values
+ * (0 = bottom, 22 = top). Used on the two high-volume stat tiles; the other
+ * two tiles (last-email, flagged-count) deliberately omit the sparkline so
+ * the row stays visually balanced.
+ */
+function Sparkline({ points }: { points: number[] }) {
+  const w = 52;
+  const h = 22;
+  const max = Math.max(...points, 1);
+  const step = w / (points.length - 1);
+  const d = points
+    .map((p, i) => {
+      const x = i * step;
+      const y = h - (p / max) * (h - 2) - 1;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  return (
+    <svg
+      viewBox={`0 0 ${w} ${h}`}
+      width={w}
+      height={h}
+      style={{ position: 'absolute', right: '18px', bottom: '18px', opacity: 0.55 }}
+      aria-hidden="true"
+    >
+      <path d={d} fill="none" stroke={sparkColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** Small chip shown next to section titles like "1 item" or "clean". */
+function TagChip({ text, tone }: { text: string; tone: 'success' | 'warning' | 'info' }) {
+  const palette: Record<'success' | 'warning' | 'info', { bg: string; fg: string }> = {
+    success: { bg: colors.tealLight, fg: '#0e6b52' },
+    warning: { bg: colors.warningBg, fg: '#a24c0c' },
+    info: { bg: colors.infoBg, fg: '#1d6a89' },
+  };
+  const { bg, fg } = palette[tone];
+  return (
+    <span
+      style={{
+        fontSize: '10px',
+        fontWeight: 700,
+        padding: '3px 8px',
+        borderRadius: radii.sm,
+        textTransform: 'uppercase',
+        letterSpacing: '0.6px',
+        background: bg,
+        color: fg,
+        verticalAlign: 'middle',
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+/** Empty state for clean sections — warmer than "No entries yet." */
+function EmptyState({ message, detail }: { message: string; detail: string }) {
+  return (
+    <div
+      style={{
+        padding: '36px',
+        background: colors.pageBg,
+        borderRadius: radii.lg,
+        color: colors.textMuted,
+        fontSize: '13px',
+        textAlign: 'center',
+      }}
+    >
+      <strong style={{ color: colors.success }}>{message}</strong> {detail}
     </div>
   );
 }
@@ -258,7 +552,7 @@ function EmailLogTable({
   onRetrySuccess?: () => void;
 }) {
   if (rows.length === 0) {
-    return <div style={{ color: colors.darkGray, fontSize: '13px' }}>No entries yet.</div>;
+    return <div style={{ color: colors.textMuted, fontSize: '13px' }}>No entries yet.</div>;
   }
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -276,7 +570,7 @@ function EmailLogTable({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id}>
+            <tr key={r.id} className="sis-row">
               <td style={tdStyle}>{formatDateTime(r.received_at)}</td>
               <td style={tdStyle}>{r.sender ?? '—'}</td>
               <td style={tdStyle}>{truncate(r.subject ?? '—', 60)}</td>
@@ -290,7 +584,7 @@ function EmailLogTable({
                 <RetryCell row={r} onSuccess={onRetrySuccess} />
               </td>
               {showErrors && (
-                <td style={{ ...tdStyle, color: colors.darkGray, fontSize: '12px', maxWidth: '360px' }}>
+                <td style={{ ...tdStyle, color: colors.textMuted, fontSize: '12px', maxWidth: '360px' }}>
                   {(r.error_messages ?? []).slice(0, 2).map((m, i) => (
                     <div key={i}>{truncate(m, 200)}</div>
                   ))}
@@ -316,19 +610,8 @@ function EmailLogTable({
  *   • is_retryable=true AND next_retry_at in future             → "Auto-retry at {time}"
  *   • Status failed/partial (ANY reason, incl. terminal)         → "↻ Reprocess" button
  *
- * The two buttons exist for different situations:
- *   • "Retry Now" — short-circuits the auto-retry backoff for a transient
- *     error (e.g. Gmail API glitch). Honors the retry counter; refuses to fire
- *     on rows already classified as permanent_failure.
- *   • "Reprocess" — force re-fetches the attachment and runs it through the
- *     current dispatcher again, regardless of classification. Useful AFTER
- *     shipping new parser support for a previously-unrecognized format, so the
- *     old "failed" rows can be brought back to life without opening a SQL client.
- *
- * Retry Now  → POST /api/admin/retry-now
- * Reprocess  → POST /api/admin/reprocess-email
- *
- * Both call onSuccess() after a successful response so the parent re-fetches.
+ * Behavior is unchanged from the prior version of this component; only the
+ * button styling has been updated to match the rest of the new UI.
  */
 function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => void }) {
   const [busy, setBusy] = useState(false);               // "Retry Now" spinner
@@ -341,10 +624,6 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     (row.status === 'failed' || row.status === 'partial') &&
     retryCount < maxRetries &&
     row.last_retry_outcome !== 'permanent_failure';
-  // Reprocess is available on ANY failed/partial row — even terminal ones.
-  // That's the whole point: after a code deploy, we want to retry rows that
-  // the retry worker is deliberately ignoring because they were classified
-  // as permanently unsupported.
   const canReprocess = row.status === 'failed' || row.status === 'partial';
   const exhausted = retryCount >= maxRetries;
   const scheduledIso = row.is_retryable ? row.next_retry_at : null;
@@ -353,8 +632,6 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     setBusy(true);
     setLocalErr(null);
     try {
-      // Attach the Supabase session token so /api/admin's requireAuth
-      // middleware (Task #78) accepts the request.
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token ?? '';
 
@@ -375,15 +652,8 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
       setLocalErr(e instanceof Error ? e.message : String(e));
       setBusy(false);
     }
-    // If success: parent will re-fetch and this component will unmount/remount
-    // with fresh state, so no need to setBusy(false).
   }
 
-  /**
-   * Re-run the original attachment through the current dispatcher.
-   * Works regardless of retry classification — this is the "the code
-   * has been updated, please try again" button.
-   */
   async function handleReprocess() {
     setReprocessing(true);
     setLocalErr(null);
@@ -410,15 +680,12 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
     }
   }
 
-  // Nothing interesting to show — keep the cell tidy.
-  // (canReprocess covers every failed/partial row, so the cell only collapses
-  //  to "—" for clean rows with no retry history.)
   if (retryCount === 0 && !canRetry && !scheduledIso && !canReprocess) {
-    return <span style={{ color: colors.darkGray, fontSize: '12px' }}>—</span>;
+    return <span style={{ color: colors.textMuted, fontSize: '12px' }}>—</span>;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
       {retryCount > 0 && (
         <RetryBadge
           count={retryCount}
@@ -431,7 +698,8 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
         <button
           onClick={handleClick}
           disabled={busy || reprocessing}
-          style={retryButtonStyle(busy)}
+          className="sis-btn sis-btn-teal sis-btn-sm"
+          style={{ width: 'fit-content' }}
           title="Retry this email now, bypassing the automatic backoff"
         >
           {busy ? 'Retrying…' : 'Retry Now'}
@@ -441,14 +709,15 @@ function RetryCell({ row, onSuccess }: { row: EmailLogRow; onSuccess?: () => voi
         <button
           onClick={handleReprocess}
           disabled={busy || reprocessing}
-          style={reprocessButtonStyle(reprocessing)}
+          className="sis-btn sis-btn-secondary sis-btn-sm"
+          style={{ width: 'fit-content' }}
           title="Re-fetch this attachment and run it through the dispatcher again. Useful after a code deploy adds new parser support."
         >
           {reprocessing ? 'Reprocessing…' : '↻ Reprocess'}
         </button>
       )}
       {!canRetry && scheduledIso && (
-        <span style={{ fontSize: '11px', color: colors.darkGray }}>
+        <span style={{ fontSize: '11px', color: colors.textMuted }}>
           Auto-retry {formatRelativeFuture(scheduledIso)}
         </span>
       )}
@@ -481,8 +750,8 @@ function RetryBadge({
       style={{
         backgroundColor: bg,
         color: fg,
-        padding: '2px 7px',
-        borderRadius: '9px',
+        padding: '2px 8px',
+        borderRadius: radii.pill,
         fontSize: '11px',
         fontWeight: 600,
         display: 'inline-block',
@@ -506,50 +775,9 @@ function badgePalette(
   return { bg: `${colors.info}22`, fg: colors.info };
 }
 
-function retryButtonStyle(busy: boolean): React.CSSProperties {
-  return {
-    backgroundColor: busy ? colors.mediumGray : colors.electricTeal,
-    color: busy ? colors.darkGray : colors.white,
-    border: 'none',
-    borderRadius: '4px',
-    padding: '4px 10px',
-    fontSize: '11px',
-    fontWeight: 600,
-    cursor: busy ? 'wait' : 'pointer',
-    width: 'fit-content',
-    letterSpacing: '0.3px',
-  };
-}
-
-/**
- * Reprocess button — deliberately quieter than the teal "Retry Now" button.
- * Border-only with midnight-navy text so it reads as a secondary, "admin-ish"
- * action. The primary signal in the row should still be the status pill and
- * the retry counter; Reprocess is there for when Caleb has just deployed
- * new parser support and wants to re-run failed rows through the dispatcher.
- *
- * NOTE: our theme's `steelBlue` is a light tint (#C7CCE4) designed for text on
- * the navy header, so it's too washed-out to work as border/text on a white
- * card. We use `midnightNavy` + `mediumGray` border for adequate contrast.
- */
-function reprocessButtonStyle(busy: boolean): React.CSSProperties {
-  return {
-    backgroundColor: colors.white,
-    color: busy ? colors.darkGray : colors.midnightNavy,
-    border: `1px solid ${busy ? colors.lightGray : colors.mediumGray}`,
-    borderRadius: '4px',
-    padding: '3px 9px',
-    fontSize: '11px',
-    fontWeight: 600,
-    cursor: busy ? 'wait' : 'pointer',
-    width: 'fit-content',
-    letterSpacing: '0.3px',
-  };
-}
-
 function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
   if (rows.length === 0) {
-    return <div style={{ color: colors.darkGray, fontSize: '13px' }}>No rejections.</div>;
+    return <div style={{ color: colors.textMuted, fontSize: '13px' }}>No rejections.</div>;
   }
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -565,14 +793,14 @@ function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id}>
+            <tr key={r.id} className="sis-row">
               <td style={tdStyle}>{formatDateTime(r.created_at)}</td>
               <td style={tdStyle}>{truncate(r.source_file_name, 48)}</td>
               <td style={tdStyle}>{r.attempted_well_name ?? '—'}</td>
               <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '12px' }}>
                 {r.attempted_api10 ?? '—'}
               </td>
-              <td style={{ ...tdStyle, color: colors.darkGray, fontSize: '12px', maxWidth: '320px' }}>
+              <td style={{ ...tdStyle, color: colors.textMuted, fontSize: '12px', maxWidth: '320px' }}>
                 {r.reason}
               </td>
             </tr>
@@ -584,30 +812,41 @@ function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
 }
 
 function StatusPill({ status }: { status: string }) {
-  const map: Record<string, { bg: string; fg: string }> = {
-    completed: { bg: `${colors.success}22`, fg: colors.success },
-    partial: { bg: `${colors.warning}22`, fg: colors.warning },
-    failed: { bg: `${colors.danger}22`, fg: colors.danger },
-    skipped: { bg: `${colors.darkGray}22`, fg: colors.darkGray },
-    // "Ignored" = known-non-production file (tracking sheet, template, etc.)
-    // classified BEFORE reaching any parser. Quiet success, not an error.
-    ignored: { bg: `${colors.darkGray}22`, fg: colors.darkGray },
-    processing: { bg: `${colors.info}22`, fg: colors.info },
-    pending: { bg: `${colors.info}22`, fg: colors.info },
+  const map: Record<string, { bg: string; fg: string; dot: string }> = {
+    completed: { bg: `${colors.success}18`, fg: colors.success, dot: colors.success },
+    partial:   { bg: `${colors.warning}18`, fg: colors.warning, dot: colors.warning },
+    failed:    { bg: `${colors.danger}18`,  fg: colors.danger,  dot: colors.danger },
+    skipped:   { bg: `${colors.darkGray}18`, fg: colors.darkGray, dot: colors.darkGray },
+    ignored:   { bg: `${colors.darkGray}18`, fg: colors.darkGray, dot: colors.darkGray },
+    processing:{ bg: `${colors.info}18`,    fg: '#1d6a89',       dot: '#1d6a89' },
+    pending:   { bg: `${colors.info}18`,    fg: '#1d6a89',       dot: '#1d6a89' },
   };
-  const { bg, fg } = map[status] ?? { bg: colors.lightGray, fg: colors.darkGray };
+  const { bg, fg, dot } = map[status] ?? { bg: colors.lightGray, fg: colors.darkGray, dot: colors.darkGray };
   return (
     <span
       style={{
         backgroundColor: bg,
         color: fg,
-        padding: '3px 8px',
-        borderRadius: '10px',
-        fontSize: '12px',
+        padding: '3px 10px',
+        borderRadius: radii.pill,
+        fontSize: '11px',
         fontWeight: 600,
         textTransform: 'capitalize',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
       }}
     >
+      <span
+        aria-hidden="true"
+        style={{
+          width: '6px',
+          height: '6px',
+          borderRadius: '50%',
+          background: dot,
+          display: 'inline-block',
+        }}
+      />
       {status}
     </span>
   );
@@ -617,10 +856,10 @@ function ErrorBanner({ message }: { message: string }) {
   return (
     <div
       style={{
-        backgroundColor: '#FEF2F2',
+        backgroundColor: colors.dangerBg,
         color: colors.danger,
         border: `1px solid ${colors.danger}33`,
-        borderRadius: '6px',
+        borderRadius: radii.lg,
         padding: '12px 14px',
         fontSize: '13px',
       }}
@@ -632,12 +871,12 @@ function ErrorBanner({ message }: { message: string }) {
 
 function SkeletonRow() {
   return (
-    <div style={{ color: colors.darkGray, fontSize: '13px', fontStyle: 'italic' }}>Loading…</div>
+    <div style={{ color: colors.textMuted, fontSize: '13px', fontStyle: 'italic' }}>Loading…</div>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────
- * Small formatting helpers
+ * Small formatting helpers (unchanged)
  * ────────────────────────────────────────────────────────────── */
 
 function formatInt(n: number | null): string {
@@ -669,11 +908,6 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-/**
- * Relative-time formatter oriented toward the future ("in 12 min", "in 2 hr").
- * Used for the "Auto-retry at …" hint on rows that are queued for a
- * future retry attempt. Falls back to an absolute date if > 14 days out.
- */
 function formatRelativeFuture(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -695,32 +929,35 @@ function formatRelativeFuture(iso: string | null): string {
  * ────────────────────────────────────────────────────────────── */
 
 const cardStyle: React.CSSProperties = {
-  backgroundColor: colors.white,
-  borderRadius: '8px',
-  padding: '20px',
+  backgroundColor: colors.surface,
+  border: `1px solid ${colors.borderCard}`,
+  borderRadius: radii.xl,
+  padding: '24px',
   boxShadow: shadows.card,
 };
 
 const tableStyle: React.CSSProperties = {
   width: '100%',
-  borderCollapse: 'collapse',
+  borderCollapse: 'separate',
+  borderSpacing: 0,
   fontSize: '13px',
 };
 
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
-  color: colors.darkGray,
+  color: colors.textMuted,
   fontWeight: 600,
   fontSize: '11px',
   textTransform: 'uppercase',
-  letterSpacing: '0.5px',
-  padding: '8px 10px',
-  borderBottom: `1px solid ${colors.mediumGray}`,
+  letterSpacing: '0.6px',
+  padding: '10px 12px',
+  backgroundColor: colors.pageBg,
+  borderBottom: `1px solid ${colors.borderCard}`,
 };
 
 const tdStyle: React.CSSProperties = {
-  padding: '10px',
-  borderBottom: `1px solid ${colors.lightGray}`,
+  padding: '12px',
+  borderBottom: `1px solid ${colors.borderSoft}`,
   color: colors.midnightNavy,
   verticalAlign: 'top',
 };
