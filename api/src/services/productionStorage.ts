@@ -48,10 +48,41 @@ async function upsertOperator(operatorName: string): Promise<string> {
 }
 
 /**
+ * Look up the ComboCurve Well ID (chosen_id) for a given API10 in the
+ * combocurve_wells catalog. Returns null if the well isn't in the catalog
+ * yet — that's fine, we'll just leave combocurve_well_id null and a future
+ * catalog refresh + backfill can close the gap.
+ *
+ * Why we do this every insert instead of relying on the parser: most
+ * operator reports don't include the ComboCurve Well ID at all (it's
+ * an internal identifier). Centralizing the lookup here means EVERY
+ * parser benefits without each one needing its own join logic.
+ */
+async function lookupCombocurveWellId(api10: string): Promise<number | null> {
+  const { data, error } = await supabase
+    .from('combocurve_wells')
+    .select('chosen_id')
+    .eq('api10', api10)
+    .maybeSingle();
+  if (error) {
+    // Log but don't throw — a missing catalog match is an enrichment gap,
+    // not a blocker. The well row will still get created with null id.
+    console.warn(`[productionStorage] combocurve_wells lookup for api10=${api10} failed: ${error.message}`);
+    return null;
+  }
+  return data?.chosen_id ?? null;
+}
+
+/**
  * Upsert a well by API10. Returns its UUID.
  * Matching strategy: API10 is the authoritative key (unique constraint in DB).
  * If the well name drifts between reports, we keep the first-seen name but track
  * the alias in well_name_aliases (Phase 2).
+ *
+ * Catalog enrichment: on insert, AND on existing rows where combocurve_well_id
+ * is null, we look up chosen_id from combocurve_wells and populate the column.
+ * This keeps the 16-col ComboCurve export's "Well ID" field filled in
+ * automatically as the catalog grows — no manual reconciliation step.
  */
 async function upsertWell(
   record: ProductionRecord,
@@ -59,7 +90,7 @@ async function upsertWell(
 ): Promise<string> {
   const { data: existing } = await supabase
     .from('wells')
-    .select('id, well_name')
+    .select('id, well_name, combocurve_well_id')
     .eq('api10', record.api10)
     .maybeSingle();
 
@@ -77,8 +108,29 @@ async function upsertWell(
           { onConflict: 'alias', ignoreDuplicates: true }
         );
     }
+    // Backfill combocurve_well_id opportunistically — if this well was created
+    // before the catalog had it, but the catalog has it now, close the gap.
+    if (existing.combocurve_well_id === null || existing.combocurve_well_id === undefined) {
+      const ccId = await lookupCombocurveWellId(record.api10);
+      if (ccId !== null) {
+        const { error } = await supabase
+          .from('wells')
+          .update({ combocurve_well_id: ccId })
+          .eq('id', existing.id);
+        if (error) {
+          console.warn(
+            `[productionStorage] Failed to backfill combocurve_well_id for well ${record.api10}: ${error.message}`
+          );
+        }
+      }
+    }
     return existing.id;
   }
+
+  // New well — enrich with the catalog lookup BEFORE the insert so the
+  // ID lands on row creation (saves a round-trip and avoids a transient
+  // null state that a concurrent export could pick up).
+  const combocurveWellId = await lookupCombocurveWellId(record.api10);
 
   const { data, error } = await supabase
     .from('wells')
@@ -87,6 +139,7 @@ async function upsertWell(
       api10: record.api10,
       api14: record.api14,
       operator_id: operatorId,
+      combocurve_well_id: combocurveWellId,
     })
     .select('id')
     .single();

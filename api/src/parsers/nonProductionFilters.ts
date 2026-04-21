@@ -126,6 +126,63 @@ const ourOwnTestExport: NonProductionFilter = {
   },
 };
 
+/**
+ * ComboCurve Well Header / Catalog Export
+ * ---------------------------------------
+ * Frio Energy Holdings (and similar) send periodic CSV exports of the full
+ * ComboCurve well-header table. Filename pattern:
+ *   well_<ProjectName>_<YYYYMMDDHHMMSS>.csv
+ * e.g. well_Frio_Energy_Holdings_I__EPK_Capital_Database_20260420043844.csv
+ *
+ * These files are CRITICAL reference data (they're what gives us the
+ * "Chosen ID" aka ComboCurve Well ID for every export row), but they
+ * contain NO production volumes — only well metadata (API, formation,
+ * lease, lat/long, spud date, …). They must NEVER be routed to a
+ * production parser; the import pipeline for catalogs is the separate
+ * `scripts/import-combocurve-catalog.ts`.
+ *
+ * Detection strategy (belt & suspenders):
+ *   1. Filename matches /^well_.*_\d{14}\.csv$/i  (the ComboCurve export
+ *      naming convention), OR
+ *   2. The CSV's first row contains the distinctive ComboCurve catalog
+ *      headers "Well Name" + "API 14" + "Chosen ID" (a combination no
+ *      operator production file uses).
+ */
+const combocurveWellCatalog: NonProductionFilter = {
+  name: 'combocurve-well-catalog',
+  category: 'well catalog / reference export',
+  fileKinds: ['csv', 'xlsx', 'xls'],
+  detect(ctx: ParserContext): string | null {
+    // Rule 1: filename signature
+    const fname = ctx.filename.toLowerCase();
+    if (/^well_.*_\d{14}\.(csv|xlsx|xls)$/i.test(fname)) {
+      return (
+        'ComboCurve well-header export (filename matches "well_<project>_<timestamp>.{csv|xlsx}") — ' +
+        'this is reference metadata; ingest via scripts/import-combocurve-catalog.ts, not the email pipeline'
+      );
+    }
+
+    // Rule 2: header signature — look at the first non-empty preview row
+    const preview = ctx.sheetPreview;
+    if (!preview || preview.length === 0) return null;
+    for (let i = 0; i < Math.min(preview.length, 3); i++) {
+      const row = preview[i];
+      if (!row || row.length === 0) continue;
+      const cells = row.map(normalizeCell);
+      const hasWellName = cells.includes('well name');
+      const hasApi14 = cells.includes('api 14');
+      const hasChosenId = cells.includes('chosen id');
+      if (hasWellName && hasApi14 && hasChosenId) {
+        return (
+          'ComboCurve well-header export (headers include "Well Name", "API 14", "Chosen ID" — ' +
+          'a signature unique to the ComboCurve catalog, not an operator production report)'
+        );
+      }
+    }
+    return null;
+  },
+};
+
 /* ────────────────────────────────────────────────────────────────
  * Registry — order matters: most specific first. The dispatcher
  * short-circuits on the first match.
@@ -134,4 +191,5 @@ export const NON_PRODUCTION_FILTERS: readonly NonProductionFilter[] = [
   westPecosTrackingCatalog,
   combocurveTemplateSample,
   ourOwnTestExport,
+  combocurveWellCatalog,
 ] as const;

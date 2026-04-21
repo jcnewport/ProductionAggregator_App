@@ -44,6 +44,14 @@ const ignoreCases: IgnoreCase[] = [
     expectedFilter: 'our-own-test-export',
     expectedCategory: 'test/sample file',
   },
+  {
+    // ComboCurve well-header export from Frio Energy — filename matches the
+    // distinctive `well_<project>_<14-digit-timestamp>.csv` pattern AND the
+    // first row has "Well Name", "API 14", "Chosen ID" (double-locked signature).
+    file: 'well_Frio_Energy_Holdings_I__EPK_Capital_Database_20260420043844.csv',
+    expectedFilter: 'combocurve-well-catalog',
+    expectedCategory: 'well catalog / reference export',
+  },
 ];
 
 // Real operator files that must NOT be mis-classified as non-production.
