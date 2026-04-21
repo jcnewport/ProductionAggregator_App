@@ -228,6 +228,9 @@ function StatusPill({ status }: { status: string }) {
     partial: { bg: `${colors.warning}22`, fg: colors.warning },
     failed: { bg: `${colors.danger}22`, fg: colors.danger },
     skipped: { bg: `${colors.darkGray}22`, fg: colors.darkGray },
+    // "Ignored" = known-non-production file (tracking sheet, template, etc.)
+    // classified BEFORE reaching any parser. Quiet success, not an error.
+    ignored: { bg: `${colors.darkGray}22`, fg: colors.darkGray },
     processing: { bg: `${colors.info}22`, fg: colors.info },
     pending: { bg: `${colors.info}22`, fg: colors.info },
   };

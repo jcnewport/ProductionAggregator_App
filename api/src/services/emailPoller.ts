@@ -92,7 +92,7 @@ async function createEmailLogRow(message: EmailMessage): Promise<string> {
 
 async function finalizeEmailLog(
   emailLogId: string,
-  status: 'completed' | 'partial' | 'failed' | 'skipped',
+  status: 'completed' | 'partial' | 'failed' | 'skipped' | 'ignored',
   attachmentsProcessed: number,
   errors: string[]
 ): Promise<void> {
@@ -114,7 +114,9 @@ async function finalizeEmailLog(
 export async function processMessage(messageId: string): Promise<void> {
   let emailLogId: string | null = null;
   const errors: string[] = [];
+  const ignoredNotes: string[] = [];
   let attachmentsProcessed = 0;
+  let attachmentsIgnored = 0;
 
   try {
     const message = await getMessageWithAttachments(messageId);
@@ -133,6 +135,20 @@ export async function processMessage(messageId: string): Promise<void> {
 
         // 2. Try to parse it
         const outcome: ParserOutcome = await dispatchParser(attachment, message.sender);
+
+        if (outcome.kind === 'ignored') {
+          // Known-non-production file (tracking sheet, template, etc.) —
+          // this is a clean success, not an error. Note it for the log,
+          // but don't push to errors[] and don't count as "processed".
+          attachmentsIgnored++;
+          ignoredNotes.push(
+            `[${attachment.filename}] Ignored as ${outcome.category} (${outcome.filterName}): ${outcome.reason}`
+          );
+          console.log(
+            `[emailPoller] Ignored attachment ${attachment.filename}: ${outcome.category} (${outcome.filterName})`
+          );
+          continue;
+        }
 
         if (outcome.kind === 'unrecognized') {
           errors.push(
@@ -182,14 +198,32 @@ export async function processMessage(messageId: string): Promise<void> {
       }
     }
 
-    const status: 'completed' | 'partial' | 'failed' =
-      attachmentsProcessed === message.attachments.length
-        ? 'completed'
-        : attachmentsProcessed > 0
-          ? 'partial'
-          : 'failed';
+    // Status decision tree:
+    //   • All attachments parsed → completed
+    //   • At least one parsed, rest ignored, no errors → completed
+    //   • Nothing parsed, everything ignored, no errors → ignored (quiet success)
+    //   • Some parsed + some errored → partial
+    //   • Nothing parsed, everything errored or unrecognized → failed
+    //   • Some parsed + some errored + some ignored → partial (errors trump ignores)
+    const total = message.attachments.length;
+    const hasErrors = errors.length > 0;
+    let status: 'completed' | 'partial' | 'failed' | 'ignored';
+    if (attachmentsProcessed === total) {
+      status = 'completed';
+    } else if (attachmentsProcessed + attachmentsIgnored === total && !hasErrors) {
+      // Every attachment was either parsed successfully or cleanly ignored.
+      status = attachmentsProcessed > 0 ? 'completed' : 'ignored';
+    } else if (attachmentsProcessed > 0) {
+      status = 'partial';
+    } else {
+      status = 'failed';
+    }
 
-    await finalizeEmailLog(emailLogId, status, attachmentsProcessed, errors);
+    // Ignored notes are written into the error_messages column too — NOT as
+    // errors (the UI filters by status), but so we have a breadcrumb of why
+    // we skipped each file. Keep them at the END so real errors surface first.
+    const finalMessages = [...errors, ...ignoredNotes];
+    await finalizeEmailLog(emailLogId, status, attachmentsProcessed, finalMessages);
     await markMessageRead(messageId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

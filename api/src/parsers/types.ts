@@ -121,3 +121,33 @@ export interface RegisteredFormat {
   /** Freeform notes about the format, quirks, known edge cases. */
   notes?: string;
 }
+
+/* ────────────────────────────────────────────────────────────────
+ * NonProductionFilter — a pre-dispatch classifier that recognizes
+ * KNOWN-NON-PRODUCTION attachments (tracking spreadsheets, invoices,
+ * statements, sample/test files) and routes them to a dedicated
+ * "ignored" outcome.
+ *
+ * These run BEFORE the FormatAdapter chain so a tracking file can
+ * never accidentally match a loose adapter (e.g. Generic CSV).
+ *
+ * NonProductionFilters have NO parse() — they only classify.
+ * ──────────────────────────────────────────────────────────────── */
+export interface NonProductionFilter {
+  /** Short stable identifier (kebab-case), shown in logs. */
+  readonly name: string;
+  /** One-phrase category shown in the UI ("tracking spreadsheet",
+   *  "sample file", "invoice", etc.). */
+  readonly category: string;
+  /** File types this filter considers. */
+  readonly fileKinds: readonly FileKind[];
+  /**
+   * Cheap signature check reading only from the pre-populated
+   * ParserContext (pdfText, sheetNames, sheetPreview, filename).
+   * Returns a reason string if matched, null if not matched.
+   * Using a returned reason (instead of a boolean) lets the filter
+   * explain WHY — e.g. "well-tracking catalog (has 'Monthly Data' +
+   * 'Daily Data' + 'Frequency' header signature)".
+   */
+  detect(ctx: ParserContext): string | null;
+}

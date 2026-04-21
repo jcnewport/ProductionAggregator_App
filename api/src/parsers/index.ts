@@ -29,6 +29,7 @@ import type {
   ProductionRecord,
 } from './types.js';
 import { FORMAT_REGISTRY } from './registry.js';
+import { NON_PRODUCTION_FILTERS } from './nonProductionFilters.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 
 // Re-export so callers (services/productionStorage.ts) can keep their import.
@@ -44,6 +45,18 @@ export type ParserOutcome =
     }
   | {
       kind: 'unrecognized';
+      reason: string;
+    }
+  | {
+      /** Attachment was recognized as a KNOWN-NON-PRODUCTION file (tracking
+       *  spreadsheet, template, invoice, etc.). This is a clean success —
+       *  not an error, not "needs a new parser". It just isn't production data. */
+      kind: 'ignored';
+      /** Short category label shown in the UI ("tracking spreadsheet", etc.). */
+      category: string;
+      /** Which filter classified it (stable id, shown in logs). */
+      filterName: string;
+      /** Human-readable explanation of WHY we ignored it. */
       reason: string;
     }
   | {
@@ -171,6 +184,28 @@ export async function dispatchParser(
       kind: 'unrecognized',
       reason: `Unsupported file type: ${attachment.mimeType} (${attachment.filename})`,
     };
+  }
+
+  // Non-production filter pass — runs BEFORE format adapters so a tracking
+  // spreadsheet / template / sample file can never accidentally match a
+  // loose adapter (e.g. Generic Production CSV) and corrupt production data.
+  for (const filter of NON_PRODUCTION_FILTERS) {
+    if (!filter.fileKinds.includes(ctx.fileKind)) continue;
+    let reason: string | null = null;
+    try {
+      reason = filter.detect(ctx);
+    } catch (err) {
+      console.warn(`[dispatcher] NonProductionFilter "${filter.name}" threw:`, err);
+      continue;
+    }
+    if (reason) {
+      return {
+        kind: 'ignored',
+        category: filter.category,
+        filterName: filter.name,
+        reason,
+      };
+    }
   }
 
   // Walk the registry in order; first adapter that accepts the file kind AND
