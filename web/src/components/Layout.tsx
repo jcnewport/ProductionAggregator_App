@@ -21,6 +21,7 @@ const navLinks = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/export/monthly', label: 'Monthly Export', end: false },
   { to: '/export/daily', label: 'Daily Export', end: false },
+  { to: '/exports/history', label: 'Export History', end: false },
 ];
 
 export default function Layout() {

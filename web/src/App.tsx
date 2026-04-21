@@ -17,6 +17,7 @@ import ProtectedRoute from './auth/ProtectedRoute';
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
 import DailyExportPage from './pages/DailyExportPage';
+import ExportHistoryPage from './pages/ExportHistoryPage';
 import LoginPage from './pages/LoginPage';
 import MonthlyExportPage from './pages/MonthlyExportPage';
 
@@ -32,6 +33,7 @@ export default function App() {
               <Route path="/" element={<DashboardPage />} />
               <Route path="/export/monthly" element={<MonthlyExportPage />} />
               <Route path="/export/daily" element={<DailyExportPage />} />
+              <Route path="/exports/history" element={<ExportHistoryPage />} />
             </Route>
           </Route>
 

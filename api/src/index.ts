@@ -17,6 +17,7 @@ import fs from 'fs';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
 import { startRetryWorkerCron } from './services/retryWorker.js';
 import exportsRouter from './routes/exports.js';
+import exportHistoryRouter from './routes/exportHistory.js';
 import adminRouter from './routes/admin.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
 
@@ -55,6 +56,12 @@ app.post('/api/poll', async (_req, res) => {
 //   GET /api/export/monthly?start=YYYY-MM&end=YYYY-MM
 //   GET /api/export/daily?start=YYYY-MM-DD&end=YYYY-MM-DD
 app.use('/api/export', exportsRouter);
+
+// Export history (Task #77):
+//   GET /api/exports                     — paginated list, newest first
+//   GET /api/exports/:id                 — single row
+//   GET /api/exports/:id/download        — 302 redirect to signed URL
+app.use('/api/exports', exportHistoryRouter);
 
 // Admin operations — reprocess failed emails, etc.
 //   POST /api/admin/reprocess-email     { emailLogId?, gmailMessageId? }
