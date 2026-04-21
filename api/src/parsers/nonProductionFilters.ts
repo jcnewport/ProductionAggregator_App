@@ -214,41 +214,51 @@ const CATALOG_ONLY_HEADERS: readonly string[] = [
 ];
 
 /**
- * Production-volume column headers. If ANY of these appear in the header
- * row, the file is production data — not a catalog — even if the row also
- * happens to include the Well Name / API 14 / Chosen ID identity triplet.
+ * Production-volume column headers. If ANY cell in the header row looks
+ * like a volume column, the file is production data — not a catalog — even
+ * if the row also happens to include the Well Name / API 14 / Chosen ID
+ * identity triplet.
+ *
+ * Match strategy is pattern-based rather than a literal exact-match list so
+ * that operator-specific unit formats (e.g. "Oil (BBL/D)", "Gas (MCF/D)",
+ * "Water (BBL/D)" used by the Frio/Ruthless dailies) are recognized without
+ * having to enumerate every combination of units. The patterns are written
+ * to be conservative — they only fire on cells that LOOK like a volume
+ * column header (something + oil/gas/water + something-volume-ish), not
+ * anything that happens to contain the word "oil".
+ *
+ * All regexes run against a cell that has already been lowercased and
+ * trimmed by `normalizeCell`.
  */
-const PRODUCTION_VOLUME_HEADERS: readonly string[] = [
-  'oil prod',
-  'oilprod',
-  'oil production',
-  'gas prod',
-  'gasprod',
-  'gas production',
-  'water prod',
-  'waterprod',
-  'water production',
-  'oil sales',
-  'oilsales',
-  'oil sold',
-  'gas sales',
-  'gassales',
-  'gas sold',
-  'alloc oil',
-  'alloc gas',
-  'alloc wat',
-  'alloc water',
-  'new prod oil',
-  'new prod gas',
-  'total oil',
-  'total gas',
-  'total water',
-  'gross oil',
-  'gross gas',
-  'bopd',
-  'mcfpd',
-  'bwpd',
+const PRODUCTION_VOLUME_HEADER_PATTERNS: readonly RegExp[] = [
+  // "Oil Prod", "oil production", "Gas Prod", "Water Production" (with any separator)
+  /^(oil|gas|water)[\s_-]*prod(uction)?$/,
+  // "Oil Sales", "gas sold", "oilsales", "gas sold"
+  /^(oil|gas|water)[\s_-]*sales?$/,
+  /^(oil|gas|water)[\s_-]*sold$/,
+  // "Gross Oil", "Net Gas", "Total Water", "New Prod Oil", "New Prod Gas"
+  /^(gross|net|total)[\s_-]+(oil|gas|water)$/,
+  /^new[\s_-]+prod[\s_-]+(oil|gas|water)$/,
+  // "Alloc Oil", "Alloc Gas", "Alloc Wat (bbl)", "Allocated Water"
+  /^alloc(ated)?[\s_-]+(oil|gas|wat(er)?)(\s*\(.*\))?$/,
+  // "Oil (BBL)", "Oil (BBL/D)", "Gas (MCF)", "Gas (MCF/D)", "Water (BBL)", "Water (BBL/D)"
+  /^(oil|gas|water)\s*\(\s*(bbl|mcf)[^)]*\)$/,
+  // "Oil Volume", "Gas Volume"
+  /^(oil|gas|water)[\s_-]*volume$/,
+  // Rate-style abbreviations
+  /^bopd$/,
+  /^mcfpd$/,
+  /^bwpd$/,
+  // "Oil BBL", "Gas MCF" (no parens)
+  /^(oil|gas|water)[\s_-]+(bbl|mcf)(\s*\/?\s*d)?$/,
+  // "MCF Gas", "BBL Oil" — inverted but seen in the wild
+  /^(bbl|mcf)[\s_-]+(oil|gas|water)$/,
 ];
+
+/** Returns true if the header cell looks like a production-volume column. */
+function isProductionVolumeHeader(cell: string): boolean {
+  return PRODUCTION_VOLUME_HEADER_PATTERNS.some((re) => re.test(cell));
+}
 
 const combocurveWellCatalog: NonProductionFilter = {
   name: 'combocurve-well-catalog',
@@ -282,8 +292,9 @@ const combocurveWellCatalog: NonProductionFilter = {
 
       // (b) disqualifier: any production-volume column present → this is
       //     production data carrying Chosen ID as a cross-reference. Let
-      //     the FormatAdapter chain handle it.
-      const volumeHits = PRODUCTION_VOLUME_HEADERS.filter((h) => cells.includes(h));
+      //     the FormatAdapter chain handle it. Pattern-based so unit-in-parens
+      //     variants like "Oil (BBL/D)" are caught without enumerating each.
+      const volumeHits = cells.filter(isProductionVolumeHeader);
       if (volumeHits.length > 0) {
         return null;
       }

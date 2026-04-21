@@ -241,6 +241,22 @@ async function main() {
     'utf-8'
   );
 
+  // REAL-Ruthless-header-shape CSV: the actual 2026.04.07 Ruthless Dailies
+  // header carries THREE catalog-only columns (INPT ID, Aries ID, PhdWin ID)
+  // alongside the identity triplet — which satisfies the ≥2 catalog-only
+  // disqualifier-count. The ONLY reason this file must parse is that it has
+  // production-volume columns in the unit-in-parens form — "Oil (BBL/D)",
+  // "Gas (MCF/D)", "Water (BBL/D)". If PRODUCTION_VOLUME_HEADER_PATTERNS
+  // misses this variant, the filter eats the file. Task #69, 2026-04-21.
+  const ruthlessRealHeaderCsv = Buffer.from(
+    [
+      'Well Name,Well Number,API 14,INPT ID,Chosen ID,Aries ID,PhdWin ID,Date,Oil (BBL/D),Gas (MCF/D),Water (BBL/D)',
+      'RUTHLESS 11 FEDERAL COM 729H,729H,30025511740000,INPTk16xDUCDz7,3002551174,,,11/18/2023,0.33,429.23,0.29',
+      'RUTHLESS 11 FEDERAL COM 729H,729H,30025511740000,INPTk16xDUCDz7,3002551174,,,11/19/2023,1452.98,4328.6,5826.18',
+    ].join('\n'),
+    'utf-8'
+  );
+
   // A file that HAS a partial catalog-style shape (one catalog-only column)
   // but ALSO a production-volume column. Must NOT be caught — the volume
   // column is the disqualifier, even though "INPT ID" is a catalog signal.
@@ -271,6 +287,13 @@ async function main() {
       expectedFormat: 'Generic Production CSV',
       description:
         'Ruthless Dailies carries Well Name + API 14 + Chosen ID + volume columns — must parse',
+    },
+    {
+      filename: '2026.04.07 Ruthless Dailies Production (real-header).csv',
+      buffer: ruthlessRealHeaderCsv,
+      expectedFormat: 'Generic Production CSV',
+      description:
+        'Real Ruthless header: 3 catalog-only cols (INPT/Aries/PhdWin ID) + unit-in-parens volumes (Oil (BBL/D)) — must parse (Task #69 regression guard)',
     },
     {
       filename: 'ambiguous-with-volume.csv',
