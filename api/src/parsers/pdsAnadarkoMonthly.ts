@@ -72,12 +72,21 @@ function normalizeMonthlyDate(isoDate: string): string {
  */
 export function isPdsAnadarkoMonthly(rawText: string): boolean {
   const hasMonthlyHeader = /Monthly Production Estimates/i.test(rawText);
-  const hasFrio = /FRIO ENERGY HOLDINGS/i.test(rawText);
+  // PDS distributes Anadarko data to multiple assignee companies. We've seen
+  // two variants in the wild so far:
+  //   • "FRIO ENERGY HOLDINGS I LLC"        (original Anadarko feed)
+  //   • "WEST PECOS TRADING COMPANY[, ] LLC"  (2026-04 onwards — same operator,
+  //                                             different recipient entity)
+  // Both are legitimate — they come through the same PDS pipeline with the
+  // same column layout. Accept either so the Anadarko detector keeps firing.
+  const hasKnownAssignee =
+    /FRIO ENERGY HOLDINGS/i.test(rawText) ||
+    /WEST PECOS TRADING COMPANY/i.test(rawText);
   const hasPds = /PDS Well Data Exchange/i.test(rawText);
   // Anadarko-specific column labels (EOG uses "Water Inj" and "DaysOn" without space)
   const hasAnadarkoColumns =
     /Water\s*Inject/i.test(rawText) && /Days\s+On\b/i.test(rawText);
-  return hasMonthlyHeader && hasFrio && hasPds && hasAnadarkoColumns;
+  return hasMonthlyHeader && hasKnownAssignee && hasPds && hasAnadarkoColumns;
 }
 
 /**

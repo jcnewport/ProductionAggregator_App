@@ -277,8 +277,12 @@ export async function dispatchParser(
 
   // No adapter matched — return a descriptive unrecognized outcome so the
   // email_log row can show what we DID see (helps diagnose new operator formats).
+  // Note: we deliberately grab up to 3000 chars of PDF text here. For new/unknown
+  // operators we want the column header row and a sample data row to land in
+  // email_log.error_messages so we can build a parser from the snippet alone —
+  // 200 chars was too short and typically only captured the PDF title banner.
   const snippet =
-    ctx.pdfText?.slice(0, 200) ??
+    ctx.pdfText?.slice(0, 3000) ??
     (ctx.sheetNames ? `Sheet names: ${ctx.sheetNames.join(', ')}` : '(no preview available)');
   return {
     kind: 'unrecognized',
