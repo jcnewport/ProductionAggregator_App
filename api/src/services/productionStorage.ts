@@ -17,6 +17,7 @@
 
 import { supabase } from './supabase.js';
 import type { ProductionRecord } from '../parsers/pdsAnadarkoMonthly.js';
+import { isValidApi10 } from '../parsers/apiNormalization.js';
 
 export interface StorageContext {
   sourceEmailId: string;      // email_log.id (UUID)
@@ -240,19 +241,70 @@ function toRowShape(
 }
 
 /**
+ * Partition records into (valid, skipped) based on api10 validity.
+ *
+ * Why this is a storage-boundary concern:
+ *   Parsers SHOULD emit only valid APIs, but we treat storage as the last
+ *   line of defense. If a parser bug (or a new format we haven't hardened
+ *   against yet) emits a malformed api10 like "0042301413" or "4230000000",
+ *   we refuse to create a well for it — rather than polluting the wells
+ *   table with garbage that has to be hand-cleaned later (as happened in
+ *   Task #54 Phase B).
+ *
+ * Per project rule "never silently fail": we DO NOT abort the whole import
+ * on one bad row. We log loudly (one line per reject, source file included)
+ * so the issue surfaces in Railway logs, and the caller can count skipped.
+ */
+function partitionByValidApi10(
+  records: ProductionRecord[],
+  context: StorageContext,
+  granularity: 'monthly' | 'daily'
+): { valid: ProductionRecord[]; skipped: ProductionRecord[] } {
+  const valid: ProductionRecord[] = [];
+  const skipped: ProductionRecord[] = [];
+  for (const r of records) {
+    if (isValidApi10(r.api10)) {
+      valid.push(r);
+    } else {
+      skipped.push(r);
+    }
+  }
+  if (skipped.length > 0) {
+    console.warn(
+      `[productionStorage] Skipped ${skipped.length} ${granularity} records with invalid api10 ` +
+        `from "${context.sourceFileName}". Sample: ` +
+        skipped
+          .slice(0, 3)
+          .map((r) => `api10="${r.api10}" well="${r.wellName}" date=${r.prodDate}`)
+          .join(' | ')
+    );
+  }
+  return { valid, skipped };
+}
+
+/**
  * Store monthly production records. Upserts on (well_id, prod_date).
  */
 export async function storeMonthlyRecords(
   records: ProductionRecord[],
   context: StorageContext
-): Promise<{ inserted: number; operatorId: string }> {
-  if (records.length === 0) return { inserted: 0, operatorId: '' };
+): Promise<{ inserted: number; skipped: number; operatorId: string }> {
+  if (records.length === 0) return { inserted: 0, skipped: 0, operatorId: '' };
+
+  const { valid: validRecords, skipped: skippedRecords } = partitionByValidApi10(
+    records,
+    context,
+    'monthly'
+  );
+  if (validRecords.length === 0) {
+    return { inserted: 0, skipped: skippedRecords.length, operatorId: '' };
+  }
 
   const operatorId = await upsertOperator(context.operatorName);
 
   // Upsert all wells first (in parallel-ish — but serialize to avoid race on API10 unique)
   const uniqueByApi10 = new Map<string, ProductionRecord>();
-  for (const r of records) uniqueByApi10.set(r.api10, r);
+  for (const r of validRecords) uniqueByApi10.set(r.api10, r);
 
   const apiToWellId = new Map<string, string>();
   for (const rec of uniqueByApi10.values()) {
@@ -261,7 +313,7 @@ export async function storeMonthlyRecords(
   }
 
   // Build rows
-  const rawRows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+  const rawRows = validRecords.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
 
   // Dedupe by (well_id, prod_date) BEFORE upsert — Postgres rejects an ON CONFLICT
   // batch that targets the same row twice. Last-row-wins matches O&G correction semantics.
@@ -279,7 +331,7 @@ export async function storeMonthlyRecords(
     inserted += count ?? chunk.length;
   }
 
-  return { inserted, operatorId };
+  return { inserted, skipped: skippedRecords.length, operatorId };
 }
 
 /**
@@ -289,12 +341,21 @@ export async function storeMonthlyRecords(
 export async function storeDailyRecords(
   records: ProductionRecord[],
   context: StorageContext
-): Promise<{ inserted: number; operatorId: string }> {
-  if (records.length === 0) return { inserted: 0, operatorId: '' };
+): Promise<{ inserted: number; skipped: number; operatorId: string }> {
+  if (records.length === 0) return { inserted: 0, skipped: 0, operatorId: '' };
+
+  const { valid: validRecords, skipped: skippedRecords } = partitionByValidApi10(
+    records,
+    context,
+    'daily'
+  );
+  if (validRecords.length === 0) {
+    return { inserted: 0, skipped: skippedRecords.length, operatorId: '' };
+  }
 
   const operatorId = await upsertOperator(context.operatorName);
   const uniqueByApi10 = new Map<string, ProductionRecord>();
-  for (const r of records) uniqueByApi10.set(r.api10, r);
+  for (const r of validRecords) uniqueByApi10.set(r.api10, r);
 
   const apiToWellId = new Map<string, string>();
   for (const rec of uniqueByApi10.values()) {
@@ -302,7 +363,7 @@ export async function storeDailyRecords(
     apiToWellId.set(rec.api10, wellId);
   }
 
-  const rawRows = records.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
+  const rawRows = validRecords.map((r) => toRowShape(r, apiToWellId.get(r.api10)!, operatorId, context));
 
   // Same dedupe rationale as storeMonthlyRecords — prevents ON CONFLICT crashes
   // when the source file has multiple rows for the same (well, day).
@@ -319,5 +380,5 @@ export async function storeDailyRecords(
     inserted += count ?? chunk.length;
   }
 
-  return { inserted, operatorId };
+  return { inserted, skipped: skippedRecords.length, operatorId };
 }

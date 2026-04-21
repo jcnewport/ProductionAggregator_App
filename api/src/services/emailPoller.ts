@@ -177,10 +177,11 @@ export async function processMessage(messageId: string): Promise<void> {
           operatorName: outcome.operatorName,
         };
 
+        let storeResult: { inserted: number; skipped: number; operatorId: string };
         if (outcome.dataType === 'monthly') {
-          await storeMonthlyRecords(outcome.records, context);
+          storeResult = await storeMonthlyRecords(outcome.records, context);
         } else if (outcome.dataType === 'daily') {
-          await storeDailyRecords(outcome.records, context);
+          storeResult = await storeDailyRecords(outcome.records, context);
         } else {
           // Weekly should be divided into daily rows by the parser BEFORE
           // reaching here (per project rules). If we ever see dataType='weekly'
@@ -190,6 +191,15 @@ export async function processMessage(messageId: string): Promise<void> {
               `weekly data must be pre-divided into daily rows by the parser.`
           );
           continue;
+        }
+        // Soft warning: storage skipped some records due to invalid api10.
+        // Doesn't fail the attachment (most rows still inserted); surfaces
+        // in the dashboard so Caleb can see that something needs attention.
+        if (storeResult.skipped > 0) {
+          ignoredNotes.push(
+            `[${attachment.filename}] ${storeResult.inserted} rows inserted, ` +
+              `${storeResult.skipped} skipped (invalid/missing API — check parser output).`
+          );
         }
         attachmentsProcessed++;
       } catch (err) {

@@ -49,6 +49,7 @@
 
 import * as XLSX from 'xlsx';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Utilities (kept local — no dependency on other adapter files).
@@ -63,19 +64,11 @@ function parseNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function toApi10(raw: unknown): string {
-  if (raw === null || raw === undefined) return '';
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits === '') return '';
-  return digits.slice(0, 10).padStart(10, '0');
-}
-
-function api10ToApi14(api10: string): string {
-  const digits = api10.replace(/\D/g, '');
-  if (digits === '') return '';
-  if (digits.length >= 14) return digits.slice(0, 14);
-  return digits.padEnd(14, '0');
-}
+// API normalization moved to shared apiNormalization.ts.
+// The old toApi10 used padStart (left-pads short inputs with zeros → "00" state
+// code bug) and api10ToApi14 used padEnd (right-pads, producing inconsistent
+// api14.slice(0,10) !== api10). The shared module fixes both by handling the
+// 4 legitimate widths (8, 10, 12, 14) correctly.
 
 /** Parse an indented-date cell like "    3/1/2026" or a plain Date/serial. */
 function toIsoDateMaybe(v: unknown): string | null {
@@ -308,8 +301,9 @@ export function parseHierarchicalAllocatedXlsx(buf: Buffer): ProductionRecord[] 
       if (rawApi !== '') currentWellApi = rawApi;
     }
 
-    const api10 = currentWellApi ? toApi10(currentWellApi) : '';
-    const api14 = api10 ? api10ToApi14(api10) : '';
+    const { api10, api14 } = currentWellApi
+      ? normalizeApi(currentWellApi)
+      : { api10: '', api14: '' };
 
     const get = (canonical: CanonicalCol): unknown => {
       const idx = colIdxOf(canonical);

@@ -58,6 +58,7 @@
 
 import pdfParse from 'pdf-parse';
 import type { FormatAdapter, ParserContext, ProductionRecord } from './types.js';
+import { normalizeApi } from './apiNormalization.js';
 
 function parseNum(token: string | undefined | null): number | null {
   if (token === null || token === undefined) return null;
@@ -73,16 +74,8 @@ function normalizeMonthlyDate(isoDate: string): string {
   const [yyyy, mm] = isoDate.split('-');
   return `${yyyy}-${mm}-01`;
 }
-
-/** 10-digit API → api10 + trailing-"0000" padded api14. */
-function normalizeApi(rawApi: string): { api10: string; api14: string } {
-  const digits = rawApi.replace(/\D/g, '');
-  if (digits === '') return { api10: '', api14: '' };
-  const api10 = digits.slice(0, 10).padStart(10, '0');
-  const api14 =
-    digits.length >= 14 ? digits.slice(0, 14) : (digits + '0000').slice(0, 14);
-  return { api10, api14 };
-}
+// API normalization moved to shared apiNormalization.ts — no more padStart bug
+// that produced leading-zero API10s like "0042301413" from 8-digit Mewbourne inputs.
 
 type TextItem = { x: number; y: number; str: string; page: number };
 
