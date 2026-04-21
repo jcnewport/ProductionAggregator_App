@@ -1,8 +1,14 @@
 /**
- * Smoke test for the Hierarchical Allocated-Production XLSX adapter.
- * Runs it against all four real samples (Tap Rock Feb, Tap Rock Mar,
- * West Pecos, Monthly Report) and prints per-file record counts,
- * first/last record, missing-API count, and well count.
+ * Smoke test for the Hierarchical Allocated-Production adapters.
+ * Runs them against all real samples (XLSX + PDF variants) and prints
+ * per-file record counts, first/last record, missing-API count, and
+ * well count.
+ *
+ * The PDF adapter (hierarchicalAllocatedPdfAdapter) shares column
+ * semantics with the XLSX adapter; when both variants exist for the
+ * same reporting period they should produce the same well+date rows
+ * (values may differ slightly by PDF-rendering quirks — see the
+ * "pdfParseWarning" extraField for flagged rows).
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -12,33 +18,46 @@ const WORKSPACE = path.resolve(__dirname, '..', '..');
 
 const cases: {
   file: string;
+  mimeType: string;
   expectedFormat: string;
   minRecords: number;
   expectApi: boolean;
 }[] = [
   {
     file: '2026.03.03 Tap Rock Partner Report Feb 2026.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     expectedFormat: 'Hierarchical Allocated Production XLSX',
     minRecords: 150, // Feb 2026 has ~8 wells x ~28 days each ≈ 224 — conservative floor
     expectApi: true,
   },
   {
     file: '2026.04.03 Tap Rock Partner Report Mar 2026.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     expectedFormat: 'Hierarchical Allocated Production XLSX',
     minRecords: 150,
     expectApi: true,
   },
   {
     file: 'PARTNER REPORT - WEST PECOS.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     expectedFormat: 'Hierarchical Allocated Production XLSX',
     minRecords: 150,
     expectApi: true,
   },
   {
     file: 'Monthly Report.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     expectedFormat: 'Hierarchical Allocated Production XLSX',
     minRecords: 30, // 2 wells x ~30 days = 60 rows
     expectApi: false, // Monthly_Report has no API column
+  },
+  // ─── PDF variants — same "Partner Report" layout in PDF form ───
+  {
+    file: 'PARTNER REPORT - WEST PECOS.pdf',
+    mimeType: 'application/pdf',
+    expectedFormat: 'Hierarchical Allocated Production PDF',
+    minRecords: 150, // 8 wells x 28 days = 224 — same floor as XLSX
+    expectApi: true,
   },
 ];
 
@@ -55,8 +74,7 @@ async function main() {
     const outcome = await dispatchParser(
       {
         filename: c.file,
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        mimeType: c.mimeType,
         data: buffer,
       } as any,
       'test@example.com'

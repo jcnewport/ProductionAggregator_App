@@ -21,6 +21,7 @@ import { aftermathDailiesCsvAdapter } from './aftermathDailiesCsv.js';
 import { genericProductionCsvAdapter } from './genericProductionCsv.js';
 import { arloPartnerReportXlsxAdapter } from './arloPartnerReportXlsx.js';
 import { hierarchicalAllocatedXlsxAdapter } from './hierarchicalAllocatedXlsx.js';
+import { hierarchicalAllocatedPdfAdapter } from './hierarchicalAllocatedPdf.js';
 import { btaDailyPerWellXlsxAdapter } from './btaDailyPerWellXlsx.js';
 import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
 import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
@@ -426,6 +427,32 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     status: 'implemented',
     notes:
       'Covers Tap Rock, West Pecos, and Gretchen/EFG Monthly Report — all share the hierarchical "well-identity row + indented date rows" layout. Handles missing-API case (Monthly Report). Negative values preserved. Well-total rows captured in extraFields.wellTotalBlock. OpTm in extraFields.opTmHr; DT (hr) → hoursDown.',
+  },
+
+  // ─── Format 10 (PDF variant) — Hierarchical Allocated-Production PDF ───
+  //
+  // PDF sibling of the XLSX above. Same column semantics and column-mapping
+  // conventions so both variants produce identical ProductionRecord rows for
+  // the same underlying data. Kept as a SEPARATE adapter (rather than
+  // multi-file-kind on the XLSX one) because the parser internals are
+  // fundamentally different: pdf-parse emits a line-oriented text stream
+  // whose numeric columns get concatenated (no separators), so we run a
+  // small state machine over well-name / date / api-11 / api-3 / 8-decimal-
+  // row transitions instead of a sheet_to_json grid walk.
+  //
+  // PDF-rendering quirk handled inline: when a row comes back with 7 decimal
+  // matches instead of 8 the missing slot is always the zero-valued tubing
+  // pressure (confirmed against the XLSX version of the same report). We
+  // null out tubingPres rather than shift casingPres into the Ptub slot.
+  //
+  // Detect: "Completion Well Name/Date" + an "Alloc <Oil|Gas|Wat>" column
+  // + "Well Param Chk Sz" + excludes PDS Well Data Exchange.
+  {
+    adapter: hierarchicalAllocatedPdfAdapter,
+    sampleFile: 'PARTNER REPORT - WEST PECOS.pdf',
+    status: 'implemented',
+    notes:
+      'Line-oriented state machine over pdf-parse output. 8 concatenated decimals per row map to OpTm|DT|Oil|Gas|Wat|ChkSz|Ptub|Pcas. 7-decimal short rows null Ptub (zero-value rendering loss). Totals rows captured in extraFields.wellTotalBlock of first daily record per well. Shares column-mapping conventions with hierarchicalAllocatedXlsx.',
   },
 ];
 
