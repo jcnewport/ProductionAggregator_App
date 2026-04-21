@@ -18,6 +18,12 @@
 import { supabase } from './supabase.js';
 import type { ProductionRecord } from '../parsers/pdsAnadarkoMonthly.js';
 import { isValidApi10, normalizeAndValidateApi } from '../parsers/apiNormalization.js';
+import {
+  loadResolverIndex,
+  recordFuzzyAliasHit,
+  resolveWellByName,
+  type ResolverIndex,
+} from './wellNameResolver.js';
 
 export interface StorageContext {
   sourceEmailId: string;      // email_log.id (UUID)
@@ -259,6 +265,110 @@ function toRowShape(
 }
 
 /**
+ * Hydrate records missing api10 by resolving the well name against the
+ * `wells` + `well_name_aliases` tables.
+ *
+ * Why this runs BEFORE partitionByValidApi10:
+ *   Parsers for BTA Daily/WIO, Frio Daily, and the Hierarchical XLSX/PDF
+ *   format (Monthly_Report.xlsx — the Gretchen/EFG STATE case) deliberately
+ *   emit ProductionRecords with `api10=""` because their source files have
+ *   NO API column. Without this resolver those records would all be rejected
+ *   by the validator as "invalid api10". With the resolver, a known well
+ *   name (or a fuzzy variant thereof) pulls api10/api14/combocurve_well_id
+ *   from the canonical wells table and the record sails through validation.
+ *
+ * What this function does NOT do:
+ *   - Never overwrites a parser-supplied api10. If the record already has
+ *     a valid api10, we trust it (parsers that DO extract APIs remain
+ *     authoritative — well-name collisions shouldn't let a resolver
+ *     second-guess a clean parse).
+ *   - Never guesses in collision cases. Ambiguous matches return
+ *     {matched: null, reason: ...} and the record falls through to the
+ *     validator, which sends it to flagged_records with that reason.
+ *
+ * Side effect (best-effort):
+ *   On a successful FUZZY match, we record the original wellName string
+ *   as an alias so next time it's an exact hit. Fail-open on write error.
+ */
+async function hydrateMissingApis(
+  records: ProductionRecord[],
+  context: StorageContext,
+  granularity: 'monthly' | 'daily'
+): Promise<ProductionRecord[]> {
+  // Fast path: if every record already has a valid api10, skip the index
+  // load entirely. This is the 99% case — only hierarchical / BTA / Frio
+  // formats land us in the resolver path.
+  const needsResolve = records.some((r) => !isValidApi10(r.api10) && r.wellName);
+  if (!needsResolve) return records;
+
+  let index: ResolverIndex;
+  try {
+    index = await loadResolverIndex();
+  } catch (err) {
+    console.warn(
+      `[productionStorage] well-name resolver index load failed from "${context.sourceFileName}": ` +
+        `${(err as Error).message}. Proceeding without resolution — affected records will be flagged.`
+    );
+    return records;
+  }
+
+  let resolvedExact = 0;
+  let resolvedAlias = 0;
+  let resolvedFuzzy = 0;
+  const fuzzyWriteBacks: Array<{ query: string; wellId: string }> = [];
+
+  const hydrated = records.map((r) => {
+    if (isValidApi10(r.api10) || !r.wellName) return r;
+
+    const outcome = resolveWellByName(r.wellName, index);
+    if (outcome.matched) {
+      if (outcome.tier === 'exact') resolvedExact++;
+      else if (outcome.tier === 'alias') resolvedAlias++;
+      else {
+        resolvedFuzzy++;
+        fuzzyWriteBacks.push({ query: outcome.originalQuery, wellId: outcome.matched.id });
+      }
+      return {
+        ...r,
+        api10: outcome.matched.api10,
+        api14: outcome.matched.api14,
+        combocurveWellId: outcome.matched.combocurve_well_id,
+      };
+    }
+    // No match — leave record as-is. partitionByValidApi10 will reject it
+    // and writeFlaggedRecords will surface the name-resolver reason.
+    return {
+      ...r,
+      extraFields: {
+        ...r.extraFields,
+        wellNameResolverNote: outcome.reason,
+      },
+    };
+  });
+
+  const resolvedTotal = resolvedExact + resolvedAlias + resolvedFuzzy;
+  if (resolvedTotal > 0) {
+    console.log(
+      `[productionStorage] Well-name resolver hydrated ${resolvedTotal} ${granularity} records ` +
+        `from "${context.sourceFileName}" ` +
+        `(exact=${resolvedExact}, alias=${resolvedAlias}, fuzzy=${resolvedFuzzy}).`
+    );
+  }
+
+  // Best-effort: record fuzzy hits as aliases for next time. Deduplicate
+  // within this batch so we don't hit the DB N times for the same string.
+  if (fuzzyWriteBacks.length > 0) {
+    const unique = new Map<string, string>();
+    for (const f of fuzzyWriteBacks) unique.set(f.query, f.wellId);
+    for (const [query, wellId] of unique.entries()) {
+      await recordFuzzyAliasHit(query, wellId);
+    }
+  }
+
+  return hydrated;
+}
+
+/**
  * Partition records into (valid, skipped) based on api10 validity.
  *
  * Why this is a storage-boundary concern:
@@ -373,8 +483,12 @@ export async function storeMonthlyRecords(
 ): Promise<{ inserted: number; skipped: number; operatorId: string }> {
   if (records.length === 0) return { inserted: 0, skipped: 0, operatorId: '' };
 
+  // Hydrate records missing api10 via well-name resolver BEFORE validation.
+  // No-op if all records already have valid APIs.
+  const hydratedRecords = await hydrateMissingApis(records, context, 'monthly');
+
   const { valid: validRecords, skipped: skippedRecords } = partitionByValidApi10(
-    records,
+    hydratedRecords,
     context,
     'monthly'
   );
@@ -429,8 +543,11 @@ export async function storeDailyRecords(
 ): Promise<{ inserted: number; skipped: number; operatorId: string }> {
   if (records.length === 0) return { inserted: 0, skipped: 0, operatorId: '' };
 
+  // Hydrate records missing api10 via well-name resolver BEFORE validation.
+  const hydratedRecords = await hydrateMissingApis(records, context, 'daily');
+
   const { valid: validRecords, skipped: skippedRecords } = partitionByValidApi10(
-    records,
+    hydratedRecords,
     context,
     'daily'
   );
