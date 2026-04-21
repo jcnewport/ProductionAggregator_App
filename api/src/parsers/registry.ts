@@ -26,6 +26,7 @@ import { btaWioMailoutPdfAdapter } from './btaWioMailoutPdf.js';
 import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
 import { pdsXtoMonthlyAdapter } from './pdsXtoMonthly.js';
 import { pdsConocoPhillipsDailyAdapter } from './pdsConocoPhillipsDaily.js';
+import { pdsAnadarkoDailyAdapter } from './pdsAnadarkoDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -160,30 +161,31 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Positional x/y extraction. 13 columns. Hardcoded column-center plan verified at runtime by header-fingerprint check. 12-digit API normalized: api10 = first 10 digits, api14 = pad with "00" to 14. Oil Sales typically blank → null (not 0). BHP in extraFields. 8-pt row bucket (merges the 2-pt-split BHP sub-row without colliding adjacent data rows at 18-pt spacing). Daily date preserved as YYYY-MM-DD.',
   },
 
-  // ─── Format 5a — PDS Anadarko Daily (STUB) ───
+  // ─── Format 5a — PDS Anadarko Daily (IMPLEMENTED) ───
   //
-  // Daily variant of Format 1. Same PDS boilerplate ("Daily Production
-  // Estimates" + "PDS Well Data Exchange") but identified by operator name
-  // "Anadarko Petroleum Corporation". Column set: Oil Prod, Oil Sales, Gas
-  // Prod, Gas Sales, Water Prod, Water Inject, Tubing Pres., Casing Pres,
-  // Choke, Downtime, Downtime Reason. 14-digit API. Mirrors the monthly
-  // layout but with daily granularity.
+  // Daily variant of Format 1. Same positional (x/y) extraction +
+  // hardcoded column-center plan + header-fingerprint verification
+  // pattern as Conoco Daily. 15 columns:
+  //   Well ID | Well Name | API | Prod Date |
+  //   Oil Prod | Oil Sales | Gas Prod | Gas Sales |
+  //   Water Prod | Water Inject |
+  //   Casing Pres | Tubing Pres. | Choke | Downtime | Downtime Reason
+  //
+  // Notable differences from Conoco Daily: Anadarko reports Casing
+  // Pres BEFORE Tubing Pres. (reversed), has NO Completion No,
+  // NO BHP, and INCLUDES Water Inject, Choke, Downtime, and free-text
+  // Downtime Reason columns. 14-digit API (direct, no padding). 16-pt
+  // row bucket merges the 2-pt well-name sub-row split while keeping
+  // 18-20-pt-apart adjacent rows in separate buckets. Downtime Reason
+  // is free text that can sit adjacent to the hoursDown numeric
+  // column; items containing letters with x >= 630 are force-routed
+  // to downtimeReason.
   {
-    adapter: stubAdapter({
-      name: 'PDS Anadarko Daily',
-      operatorName: 'Anadarko Petroleum (Oxy)',
-      dataType: 'daily',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@frioenergy\.com$/i, /@oxy\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
-        /Anadarko\s*Petroleum/i.test(ctx.pdfText),
-    }),
+    adapter: pdsAnadarkoDailyAdapter,
     sampleFile: 'PDSWDX-DP-Anadarko- DAILY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Mirror of Format 1 Anadarko Monthly but daily granularity. 14-digit API. Has full pressure/choke/downtime columns. "Water Inject" (with t) and "Downtime" (single word) distinguish from EOG Daily.',
+      'Positional x/y extraction. 15 columns. Hardcoded column-center plan; 16-pt row bucket. 14-digit API (direct). Detect requires "Water Inject" (with t) + "Anadarko Petroleum" and explicitly excludes Conoco (Completion No + BHP). Free-text Downtime Reason handled by letter-content override.',
   },
 
   // ─── Format 5b — PDS EOG Daily (STUB) ───
