@@ -1,4 +1,14 @@
-<svg width="32" height="32" viewBox="0 0 250 250" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path fill-rule="evenodd" clip-rule="evenodd" d="M207.527 130.511H122.106L126.225 115.413H211.647L207.527 130.511ZM213.159 109.868H127.737L132.091 93.9121H217.514L213.159 109.868ZM219.026 88.3672H133.604L137.956 72.4141H223.379L219.026 88.3672ZM224.892 66.8691H139.47L143.823 50.9121H229.246L224.892 66.8691ZM230.759 45.3672H145.336L149.256 31H234.679L230.759 45.3672ZM19.7654 183.199H105.188L101.423 197H16L19.7654 183.199ZM120.688 131.015H35.0777L23.1833 174.61H108.793L120.688 131.015Z" fill="#98A2B3"/>
+<svg width="256" height="256" viewBox="0 0 250 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Stewardship.IS">
+  <!--
+    Stewardship.IS favicon - geometric logomark (stacked bars + teal accent)
+    on a midnight-navy rounded square. Designed to read well at browser-tab
+    sizes (16x16 / 32x32) where the prior transparent version was too light.
+    Palette matches /web/src/theme.ts:
+      Navy bg: #212745 (midnightNavy)
+      Stripes: #FFFFFF (white, for max legibility at small sizes)
+      Accent:  #5DCEAF (electricTeal)
+  -->
+  <rect width="250" height="250" rx="48" ry="48" fill="#212745"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M207.527 130.511H122.106L126.225 115.413H211.647L207.527 130.511ZM213.159 109.868H127.737L132.091 93.9121H217.514L213.159 109.868ZM219.026 88.3672H133.604L137.956 72.4141H223.379L219.026 88.3672ZM224.892 66.8691H139.47L143.823 50.9121H229.246L224.892 66.8691ZM230.759 45.3672H145.336L149.256 31H234.679L230.759 45.3672ZM19.7654 183.199H105.188L101.423 197H16L19.7654 183.199ZM120.688 131.015H35.0777L23.1833 174.61H108.793L120.688 131.015Z" fill="#FFFFFF"/>
   <path d="M23.1812 174.654L35.1524 130.76H121.345L108.576 174.654H23.1812Z" fill="#5DCEAF"/>
 </svg>
