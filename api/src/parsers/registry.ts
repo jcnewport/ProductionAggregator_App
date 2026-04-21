@@ -32,6 +32,7 @@ import { pdsEogDailyAdapter } from './pdsEogDaily.js';
 import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
 import { pdsMewbourneDailyAdapter } from './pdsMewbourneDaily.js';
 import { pdsMewbourneMonthlyAdapter } from './pdsMewbourneMonthly.js';
+import { frioDailyProductionXlsxAdapter } from './frioDailyProductionXlsx.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -453,6 +454,40 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     status: 'implemented',
     notes:
       'Line-oriented state machine over pdf-parse output. 8 concatenated decimals per row map to OpTm|DT|Oil|Gas|Wat|ChkSz|Ptub|Pcas. 7-decimal short rows null Ptub (zero-value rendering loss). Totals rows captured in extraFields.wellTotalBlock of first daily record per well. Shares column-mapping conventions with hierarchicalAllocatedXlsx.',
+  },
+
+  // ─── Format 11 — Frio Daily Production XLSX ("Daily Production Report") ───
+  //
+  // Field-centric single-day snapshot arriving on the email subject
+  // "Fw: Frio Daily Production (Daily Production Report) a/o YYYY-MM-DD".
+  // Single sheet literally named "Daily Production Report", six-column
+  // per-well layout: Wellname | Oil Production | Gas Production |
+  // Gas Flare | Water Production | Production Date (Excel serial).
+  //
+  // This is NOT one of the original ten formats — it emerged during the
+  // real-email batch ingest (see project_phase1_status memory, the "pdsx"
+  // subject thread). The earlier Frio-family CSV parser (Format 6b) does
+  // NOT cover this file — that one is CSV-only, alias-driven, and this
+  // arrival is XLSX with a unique "Gas Flare" column.
+  //
+  // Quirks encoded:
+  //   - No API column. api10/api14 empty; well_name_aliases resolves wells.
+  //   - No Sales columns. oilSales/gasSales = null.
+  //   - No pressures/choke/hours-down/downtime. All null.
+  //   - Gas Flare column preserved in extraFields.gasFlare (not in
+  //     ComboCurve 16-col template).
+  //   - Fieldname (e.g. "NORTH HARPOON") preserved in extraFields.fieldname.
+  //   - Production Date is an Excel serial (e.g. 46112 = 2026-03-31).
+  //
+  // Detect is tight: requires the "Daily Production Report" sheet name
+  // AND the row-0 title AND a "Gas Flare" column in the header — the
+  // Gas Flare signature is unique to this format across our registry.
+  {
+    adapter: frioDailyProductionXlsxAdapter,
+    sampleFile: 'Frio_Daily_Production.xlsx',
+    status: 'implemented',
+    notes:
+      'Single sheet "Daily Production Report". 6 columns. No API (well_name_aliases required). Gas Flare + Fieldname in extraFields. Excel-serial dates converted via XLSX.SSF.parse_date_code. Single-day report (all rows share a Production Date).',
   },
 ];
 

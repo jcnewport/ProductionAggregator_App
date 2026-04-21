@@ -40,6 +40,7 @@ const CASES: Array<{ file: string; mime: string; expect: string }> = [
   { file: '2026.03.30 Arlo Production.xlsx',                        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', expect: 'Arlo Partner Report XLSX' },
   { file: 'March 2026 Daily Production.xlsx',                       mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', expect: 'BTA Daily Per-Well Sheets' },
   { file: 'Monthly Report.xlsx',                                    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', expect: 'Hierarchical Allocated Production XLSX' },
+  { file: 'Frio_Daily_Production.xlsx',                             mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', expect: 'Frio Daily Production XLSX' },
   // Negative case — not an operator report, should NOT match any adapter
   { file: 'ComboCurve_Prod_Template.csv',                           mime: 'text/csv',         expect: '(unrecognized)' },
 ];
