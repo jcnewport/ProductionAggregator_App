@@ -27,6 +27,7 @@ import { pdsEogMonthlyAdapter } from './pdsEogMonthly.js';
 import { pdsXtoMonthlyAdapter } from './pdsXtoMonthly.js';
 import { pdsConocoPhillipsDailyAdapter } from './pdsConocoPhillipsDaily.js';
 import { pdsAnadarkoDailyAdapter } from './pdsAnadarkoDaily.js';
+import { pdsEogDailyAdapter } from './pdsEogDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -188,28 +189,29 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
       'Positional x/y extraction. 15 columns. Hardcoded column-center plan; 16-pt row bucket. 14-digit API (direct). Detect requires "Water Inject" (with t) + "Anadarko Petroleum" and explicitly excludes Conoco (Completion No + BHP). Free-text Downtime Reason handled by letter-content override.',
   },
 
-  // ─── Format 5b — PDS EOG Daily (STUB) ───
+  // ─── Format 5b — PDS EOG Daily (IMPLEMENTED) ───
   //
-  // Daily variant of Format 2. Column header differences from Anadarko
-  // Daily: "Water Inj" (no 't'), "Hours Down" (vs "Downtime"). Detect on
-  // operator name "EOG Resources" plus the "Water Inj" signature.
+  // Daily variant of Format 2. Same positional + column-plan +
+  // fingerprint pattern as the other PDS dailies. 14 columns:
+  //   Well ID | Well Name | API | Prod Date |
+  //   Gas Prod | Gas Sales | Oil Prod | Oil Sales | Water Prod |
+  //   Choke | Tubing Pres. | Casing Pres | Hours Down | Water Inj |
+  //   Downtime Reason
+  //
+  // IMPORTANT: EOG puts GAS columns BEFORE oil columns (opposite of
+  // every other PDS daily). Column plan reflects this.
+  //
+  // Row-split quirk: some rows split into left half + right half at
+  // 2-pt y-spacing (e.g. y=422 left / y=424 right). 8-pt bucket merges
+  // them while keeping adjacent rows (18 pt apart) separate.
+  //
+  // Detect: "EOG Resources" + "Water Inj" (no 't') + not-Conoco.
   {
-    adapter: stubAdapter({
-      name: 'PDS EOG Daily',
-      operatorName: 'EOG Resources',
-      dataType: 'daily',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@pdswdx\.com$/i, /@frioenergy\.com$/i, /@eogresources\.com$/i],
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(ctx.pdfText, 'Daily Production Estimates', 'PDS Well Data Exchange') &&
-        /EOG\s*Resources/i.test(ctx.pdfText) &&
-        /Water\s*Inj(?!ect)/i.test(ctx.pdfText), // "Water Inj" but NOT "Water Inject"
-    }),
+    adapter: pdsEogDailyAdapter,
     sampleFile: 'PDSWDX-DP-EOG-DAILY.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Mirror of Format 2 EOG Monthly but daily granularity. "Water Inj" (no t) and "Hours Down" column headers. 14-digit API. LINK VJ RANCH pad seen in samples.',
+      'Positional x/y extraction. 14 columns. GAS columns before OIL columns (unique vs other PDS dailies). 8-pt row bucket handles left/right 2-pt row-splits. 14-digit API. Detect requires "Water Inj" (no t) + "EOG Resources" and excludes Conoco.',
   },
 
   // ─── Format 5c — PDS Mewbourne Daily (STUB) ───
