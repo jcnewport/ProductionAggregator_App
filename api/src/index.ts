@@ -17,6 +17,7 @@ import fs from 'fs';
 import { startEmailPollerCron, runPollingPass } from './services/emailPoller.js';
 import exportsRouter from './routes/exports.js';
 import adminRouter from './routes/admin.js';
+import flaggedRecordsRouter from './routes/flaggedRecords.js';
 
 // Load environment variables
 dotenv.config();
@@ -58,6 +59,11 @@ app.use('/api/export', exportsRouter);
 //   POST /api/admin/reprocess-email     { emailLogId?, gmailMessageId? }
 //   POST /api/admin/reprocess-failed    { statuses?, limit? }
 app.use('/api/admin', adminRouter);
+
+// Flagged records — rows rejected by storage-layer validators
+//   GET /api/flagged-records?limit=50&since=YYYY-MM-DD
+//   GET /api/flagged-records/summary
+app.use('/api/flagged-records', flaggedRecordsRouter);
 
 // TODO: Mount additional route handlers
 // app.use('/api/emails', emailRoutes);

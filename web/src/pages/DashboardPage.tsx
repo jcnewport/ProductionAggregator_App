@@ -30,12 +30,28 @@ interface Stats {
   monthlyRows: number | null;
   dailyRows: number | null;
   lastReceivedAt: string | null;
+  flaggedRowCount: number | null;
+}
+
+interface FlaggedRow {
+  id: string;
+  source_file_name: string;
+  reason: string;
+  attempted_well_name: string | null;
+  attempted_api10: string | null;
+  created_at: string;
 }
 
 export default function DashboardPage() {
   const [recent, setRecent] = useState<EmailLogRow[]>([]);
   const [flagged, setFlagged] = useState<EmailLogRow[]>([]);
-  const [stats, setStats] = useState<Stats>({ monthlyRows: null, dailyRows: null, lastReceivedAt: null });
+  const [flaggedRows, setFlaggedRows] = useState<FlaggedRow[]>([]);
+  const [stats, setStats] = useState<Stats>({
+    monthlyRows: null,
+    dailyRows: null,
+    lastReceivedAt: null,
+    flaggedRowCount: null,
+  });
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -46,8 +62,15 @@ export default function DashboardPage() {
       setLoading(true);
       setErr(null);
       try {
-        // Run all four queries in parallel for a faster first paint
-        const [recentRes, flaggedRes, monthlyCountRes, dailyCountRes] = await Promise.all([
+        // Run all queries in parallel for a faster first paint
+        const [
+          recentRes,
+          flaggedRes,
+          monthlyCountRes,
+          dailyCountRes,
+          flaggedRowsRes,
+          flaggedRowCountRes,
+        ] = await Promise.all([
           supabase
             .from('email_log')
             .select('id, sender, subject, received_at, attachments_found, attachments_processed, status, error_messages')
@@ -61,6 +84,15 @@ export default function DashboardPage() {
             .limit(10),
           supabase.from('production_monthly').select('*', { count: 'exact', head: true }),
           supabase.from('production_daily').select('*', { count: 'exact', head: true }),
+          // Row-level rejections from the storage-layer validator.
+          // Separate from email_log.status because one file can reject some
+          // rows while still storing others successfully.
+          supabase
+            .from('flagged_records')
+            .select('id, source_file_name, reason, attempted_well_name, attempted_api10, created_at')
+            .order('created_at', { ascending: false })
+            .limit(15),
+          supabase.from('flagged_records').select('*', { count: 'exact', head: true }),
         ]);
 
         if (cancelled) return;
@@ -69,13 +101,17 @@ export default function DashboardPage() {
         if (flaggedRes.error) throw new Error(`flagged: ${flaggedRes.error.message}`);
         if (monthlyCountRes.error) throw new Error(`monthly count: ${monthlyCountRes.error.message}`);
         if (dailyCountRes.error) throw new Error(`daily count: ${dailyCountRes.error.message}`);
+        if (flaggedRowsRes.error) throw new Error(`flagged_records: ${flaggedRowsRes.error.message}`);
+        if (flaggedRowCountRes.error) throw new Error(`flagged_records count: ${flaggedRowCountRes.error.message}`);
 
         setRecent((recentRes.data ?? []) as EmailLogRow[]);
         setFlagged((flaggedRes.data ?? []) as EmailLogRow[]);
+        setFlaggedRows((flaggedRowsRes.data ?? []) as FlaggedRow[]);
         setStats({
           monthlyRows: monthlyCountRes.count ?? 0,
           dailyRows: dailyCountRes.count ?? 0,
           lastReceivedAt: recentRes.data?.[0]?.received_at ?? null,
+          flaggedRowCount: flaggedRowCountRes.count ?? 0,
         });
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -100,10 +136,11 @@ export default function DashboardPage() {
       {err && <ErrorBanner message={err} />}
 
       {/* Top stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
         <StatCard label="Monthly rows in storage" value={formatInt(stats.monthlyRows)} loading={loading} />
         <StatCard label="Daily rows in storage" value={formatInt(stats.dailyRows)} loading={loading} />
         <StatCard label="Last email received" value={formatRelative(stats.lastReceivedAt)} loading={loading} />
+        <StatCard label="Rows flagged for review" value={formatInt(stats.flaggedRowCount)} loading={loading} />
       </div>
 
       {/* Flagged */}
@@ -120,6 +157,18 @@ export default function DashboardPage() {
         ) : flagged.length === 0 ? null : (
           <EmailLogTable rows={flagged} showErrors={true} />
         )}
+      </Card>
+
+      {/* Row-level rejections — individual rows within otherwise-successful files */}
+      <Card
+        title="Row-level rejections"
+        subtitle={
+          flaggedRows.length === 0
+            ? 'No individual rows have been rejected by the storage-layer validator. Inbox is clean at the row level.'
+            : `${flaggedRows.length} most recent row${flaggedRows.length === 1 ? '' : 's'} rejected by API10 validation or other storage-time checks.`
+        }
+      >
+        {loading ? <SkeletonRow /> : flaggedRows.length === 0 ? null : <FlaggedRowsTable rows={flaggedRows} />}
       </Card>
 
       {/* Recent activity */}
@@ -214,6 +263,42 @@ function EmailLogTable({ rows, showErrors }: { rows: EmailLogRow[]; showErrors: 
                   ))}
                 </td>
               )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
+  if (rows.length === 0) {
+    return <div style={{ color: colors.darkGray, fontSize: '13px' }}>No rejections.</div>;
+  }
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>When</th>
+            <th style={thStyle}>Source File</th>
+            <th style={thStyle}>Attempted Well</th>
+            <th style={thStyle}>API10</th>
+            <th style={thStyle}>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td style={tdStyle}>{formatDateTime(r.created_at)}</td>
+              <td style={tdStyle}>{truncate(r.source_file_name, 48)}</td>
+              <td style={tdStyle}>{r.attempted_well_name ?? '—'}</td>
+              <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '12px' }}>
+                {r.attempted_api10 ?? '—'}
+              </td>
+              <td style={{ ...tdStyle, color: colors.darkGray, fontSize: '12px', maxWidth: '320px' }}>
+                {r.reason}
+              </td>
             </tr>
           ))}
         </tbody>

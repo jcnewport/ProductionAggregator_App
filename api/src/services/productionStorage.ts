@@ -17,7 +17,7 @@
 
 import { supabase } from './supabase.js';
 import type { ProductionRecord } from '../parsers/pdsAnadarkoMonthly.js';
-import { isValidApi10 } from '../parsers/apiNormalization.js';
+import { isValidApi10, normalizeAndValidateApi } from '../parsers/apiNormalization.js';
 
 export interface StorageContext {
   sourceEmailId: string;      // email_log.id (UUID)
@@ -259,14 +259,20 @@ function partitionByValidApi10(
   records: ProductionRecord[],
   context: StorageContext,
   granularity: 'monthly' | 'daily'
-): { valid: ProductionRecord[]; skipped: ProductionRecord[] } {
+): { valid: ProductionRecord[]; skipped: SkippedRecord[] } {
   const valid: ProductionRecord[] = [];
-  const skipped: ProductionRecord[] = [];
+  const skipped: SkippedRecord[] = [];
   for (const r of records) {
     if (isValidApi10(r.api10)) {
       valid.push(r);
     } else {
-      skipped.push(r);
+      // Re-run the full normalize+validate to capture a human-readable reason.
+      // (We already know it's invalid; we just want the "why" for the dashboard.)
+      const validation = normalizeAndValidateApi(r.api10 || r.api14 || '');
+      skipped.push({
+        record: r,
+        reason: validation.reason ?? 'invalid api10 (reason unknown)',
+      });
     }
   }
   if (skipped.length > 0) {
@@ -275,11 +281,69 @@ function partitionByValidApi10(
         `from "${context.sourceFileName}". Sample: ` +
         skipped
           .slice(0, 3)
-          .map((r) => `api10="${r.api10}" well="${r.wellName}" date=${r.prodDate}`)
+          .map(
+            (s) =>
+              `api10="${s.record.api10}" well="${s.record.wellName}" date=${s.record.prodDate} reason="${s.reason}"`
+          )
           .join(' | ')
     );
   }
   return { valid, skipped };
+}
+
+/** A skipped record paired with the reason it failed validation. */
+interface SkippedRecord {
+  record: ProductionRecord;
+  reason: string;
+}
+
+/**
+ * Persist skipped rows to the `flagged_records` table so they surface on the
+ * dashboard instead of being buried in Railway logs.
+ *
+ * Design notes:
+ *   - Best-effort: a write failure here must NEVER break the main import.
+ *     We catch + warn + return. The console.warn above is still the source
+ *     of truth if the DB write happens to fail.
+ *   - Chunked to stay well below Supabase's ~1000-row request cap.
+ *   - `raw_fields` captures the ProductionRecord shape as JSONB so the
+ *     reviewer has enough context to retry or hand-correct the row later,
+ *     without needing to re-open the source file.
+ */
+async function writeFlaggedRecords(
+  skipped: SkippedRecord[],
+  context: StorageContext
+): Promise<void> {
+  if (skipped.length === 0) return;
+  try {
+    const rows = skipped.map(({ record, reason }) => ({
+      email_log_id: context.sourceEmailId || null,
+      source_file_name: context.sourceFileName,
+      row_number: null, // parsers don't currently surface a row number
+      reason,
+      attempted_well_name: record.wellName || null,
+      attempted_api10: record.api10 || null,
+      attempted_api14: record.api14 || null,
+      raw_fields: record as unknown as Record<string, unknown>,
+    }));
+    const CHUNK = 500;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      const { error } = await supabase.from('flagged_records').insert(chunk);
+      if (error) {
+        console.warn(
+          `[productionStorage] Failed to persist ${chunk.length} flagged rows ` +
+            `from "${context.sourceFileName}": ${error.message}`
+        );
+        return; // fail open — don't throw
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[productionStorage] Unexpected error persisting flagged rows ` +
+        `from "${context.sourceFileName}": ${(err as Error).message}`
+    );
+  }
 }
 
 /**
@@ -296,6 +360,9 @@ export async function storeMonthlyRecords(
     context,
     'monthly'
   );
+  // Persist flagged rows BEFORE the early-return so rejections still surface
+  // on the dashboard even when the entire file was rejected.
+  await writeFlaggedRecords(skippedRecords, context);
   if (validRecords.length === 0) {
     return { inserted: 0, skipped: skippedRecords.length, operatorId: '' };
   }
@@ -349,6 +416,8 @@ export async function storeDailyRecords(
     context,
     'daily'
   );
+  // See storeMonthlyRecords comment — flagged rows are persisted up-front.
+  await writeFlaggedRecords(skippedRecords, context);
   if (validRecords.length === 0) {
     return { inserted: 0, skipped: skippedRecords.length, operatorId: '' };
   }
