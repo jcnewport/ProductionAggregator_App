@@ -29,6 +29,7 @@ import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { generateComboCurveExport, type ExportType } from '../services/comboCurveExport.js';
 import { supabase } from '../services/supabase.js';
+import type { AuthenticatedRequest } from '../middleware/security.js';
 
 const router = Router();
 
@@ -96,6 +97,14 @@ async function persistExport(params: {
   wellIds: string[];
   rowCount: number;
   generatedBy: string | null;
+  /**
+   * Phase 4 multi-tenancy: stamp the exports row with the owning tenant
+   * so the history page can filter by tenant_id. For super-admin
+   * cross-tenant exports we use the caller's own tenant_id (Caleb's
+   * Frio tenant) to keep the row owned by someone — a super-admin
+   * exporting across tenants still sees the row under their account.
+   */
+  tenantId: string;
 }): Promise<string | null> {
   try {
     // Stash in Supabase Storage first. Path scheme:
@@ -135,6 +144,7 @@ async function persistExport(params: {
       file_path: storagePath,
       file_size_bytes: params.buffer.length,
       generated_by: params.generatedBy,
+      tenant_id: params.tenantId,
     });
     if (insertErr) {
       console.warn(
@@ -183,11 +193,28 @@ async function handleExport(
     const operatorIds = toArray(req.query.operator_id);
     const wellIds = toArray(req.query.well_id);
 
+    // Phase 4 multi-tenancy: tenant_id is stamped on req.tenant by
+    // requireTenantMaybe (index.ts). Super-admin callers get an unfiltered
+    // export (tenantId = undefined); regular tenant users are locked to
+    // their own tenant. We still stamp the exports row with the caller's
+    // own tenant_id so the history page shows it as "theirs".
+    const tenant = (req as AuthenticatedRequest).tenant;
+    if (!tenant) {
+      res.status(500).json({
+        ok: false,
+        error:
+          'Export handler reached without req.tenant — middleware wiring is broken.',
+      });
+      return;
+    }
+    const tenantFilter = tenant.isSuperAdmin ? undefined : tenant.tenantId;
+
     const { buffer, rowCount, wellCount } = await generateComboCurveExport(type, {
       startDate,
       endDate,
       operatorIds: operatorIds.length > 0 ? operatorIds : undefined,
       wellIds: wellIds.length > 0 ? wellIds : undefined,
+      tenantId: tenantFilter,
     });
 
     const filename = buildFileName(type, rawStart, rawEnd);
@@ -208,6 +235,7 @@ async function handleExport(
       wellIds,
       rowCount,
       generatedBy: extractUserId(req),
+      tenantId: tenant.tenantId,
     });
 
     res.setHeader(

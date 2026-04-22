@@ -21,8 +21,29 @@
 
 import { Router, type Request, type Response } from 'express';
 import { supabase } from '../services/supabase.js';
+import type { AuthenticatedRequest } from '../middleware/security.js';
 
 const router = Router();
+
+/**
+ * Phase 4 multi-tenancy helper — pulls tenant context off the request
+ * or responds with 500 if the middleware chain forgot to attach it.
+ */
+function requireTenantContext(
+  req: Request,
+  res: Response
+): { tenantId: string; isSuperAdmin: boolean } | null {
+  const tenant = (req as AuthenticatedRequest).tenant;
+  if (!tenant) {
+    res.status(500).json({
+      ok: false,
+      error:
+        'flaggedRecords handler reached without req.tenant — middleware wiring is broken.',
+    });
+    return null;
+  }
+  return tenant;
+}
 
 const MAX_LIMIT = 500;
 const DEFAULT_LIMIT = 50;
@@ -41,6 +62,9 @@ function parseLimit(raw: unknown): number {
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const tenant = requireTenantContext(req, res);
+    if (!tenant) return;
+
     const limit = parseLimit(req.query.limit);
     const since = typeof req.query.since === 'string' ? req.query.since : null;
 
@@ -53,6 +77,13 @@ router.get('/', async (req: Request, res: Response) => {
       .limit(limit);
 
     if (since) q = q.gte('created_at', since);
+
+    // Phase 4 multi-tenancy: tenant users only see their own flagged rows;
+    // super-admins see everything (useful for diagnosing parser issues
+    // across all clients).
+    if (!tenant.isSuperAdmin) {
+      q = q.eq('tenant_id', tenant.tenantId);
+    }
 
     const { data, error } = await q;
     if (error) throw error;
@@ -68,29 +99,38 @@ router.get('/', async (req: Request, res: Response) => {
  * GET /api/flagged-records/summary
  * Single aggregate row for the dashboard card — cheap call, safe to poll.
  */
-router.get('/summary', async (_req: Request, res: Response) => {
+router.get('/summary', async (req: Request, res: Response) => {
   try {
-    // Total count (all time).
-    const { count: total, error: totalErr } = await supabase
+    const tenant = requireTenantContext(req, res);
+    if (!tenant) return;
+
+    // Total count (scoped to tenant unless super-admin).
+    let totalQ = supabase
       .from('flagged_records')
       .select('id', { count: 'exact', head: true });
+    if (!tenant.isSuperAdmin) totalQ = totalQ.eq('tenant_id', tenant.tenantId);
+    const { count: total, error: totalErr } = await totalQ;
     if (totalErr) throw totalErr;
 
-    // Last-7-days count.
+    // Last-7-days count (same tenant scoping).
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { count: last7, error: last7Err } = await supabase
+    let last7Q = supabase
       .from('flagged_records')
       .select('id', { count: 'exact', head: true })
       .gte('created_at', sevenDaysAgo);
+    if (!tenant.isSuperAdmin) last7Q = last7Q.eq('tenant_id', tenant.tenantId);
+    const { count: last7, error: last7Err } = await last7Q;
     if (last7Err) throw last7Err;
 
     // Distinct reasons + most recent timestamp — one small query.
     // (We pull up to 1000 reason rows; cardinality is tiny.)
-    const { data: reasonRows, error: reasonErr } = await supabase
+    let reasonQ = supabase
       .from('flagged_records')
       .select('reason, created_at')
       .order('created_at', { ascending: false })
       .limit(1000);
+    if (!tenant.isSuperAdmin) reasonQ = reasonQ.eq('tenant_id', tenant.tenantId);
+    const { data: reasonRows, error: reasonErr } = await reasonQ;
     if (reasonErr) throw reasonErr;
 
     const distinctReasons = new Set((reasonRows ?? []).map((r) => r.reason)).size;

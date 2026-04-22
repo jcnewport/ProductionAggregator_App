@@ -158,11 +158,28 @@ export const adminLimiter = rateLimit({
 /**
  * Extend Express's Request so downstream handlers can read the
  * authenticated user without re-parsing the token.
+ *
+ * Phase 4 multi-tenancy: we also attach a `tenant` bag whenever the
+ * `requireTenant` middleware has run successfully. Routes that scope
+ * by tenant should pull from there and never re-query user_tenants.
  */
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
     email: string | null;
+  };
+  tenant?: {
+    /**
+     * The tenant the caller's login belongs to. Stamped on every write
+     * and used as a filter on every read unless the caller is a
+     * super-admin (which bypasses tenant scoping).
+     */
+    tenantId: string;
+    /**
+     * True if the caller has user_tenants.is_super_admin=true. Super-admins
+     * see and write across all tenants. Currently only Caleb.
+     */
+    isSuperAdmin: boolean;
   };
 }
 
@@ -225,4 +242,121 @@ export function requireAuthMaybe(): (
     return (_req, _res, next) => next();
   }
   return requireAuth;
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Tenant resolution middleware (Phase 4 multi-tenancy)
+ *
+ * Runs AFTER requireAuth. Looks up the caller's user_tenants row and
+ * attaches `req.tenant = { tenantId, isSuperAdmin }`. Fails closed —
+ * a user with no user_tenants row gets a 403. This is the belt-and-
+ * suspenders layer that sits on top of RLS: every tenant-scoped /api
+ * route reads req.tenant and filters its queries by tenant_id unless
+ * the caller is a super-admin.
+ *
+ * Why not just rely on RLS? Because our /api routes use the service_role
+ * key (RLS bypass) so the worker can parse incoming email. Phase 4 keeps
+ * service_role writes but adds an explicit tenant filter on reads so we
+ * cannot accidentally leak cross-tenant data via an /api response.
+ * ──────────────────────────────────────────────────────────────── */
+
+export async function requireTenant(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  // requireAuth must run first — without req.user we have nothing to look up.
+  if (!req.user?.id) {
+    res.status(401).json({
+      ok: false,
+      error:
+        'requireTenant called without an authenticated user. Chain requireAuth before this middleware.',
+    });
+    return;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('user_tenants')
+      .select('tenant_id, is_super_admin')
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    if (error) {
+      res.status(500).json({ ok: false, error: `Tenant lookup failed: ${error.message}` });
+      return;
+    }
+    if (!data) {
+      res.status(403).json({
+        ok: false,
+        error:
+          'Your account is not linked to a tenant. Contact your administrator to be added.',
+      });
+      return;
+    }
+    req.tenant = {
+      tenantId: data.tenant_id,
+      isSuperAdmin: data.is_super_admin === true,
+    };
+    next();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ ok: false, error: `Tenant resolve failed: ${msg}` });
+  }
+}
+
+/**
+ * Dev escape hatch mirroring requireAuthMaybe. With ADMIN_AUTH_DISABLED=true
+ * we skip the tenant lookup AND pretend the caller is a super-admin for the
+ * Frio tenant. Pulled from env so we can test tenant scoping locally with a
+ * different seed tenant if needed.
+ */
+export function requireTenantMaybe(): (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => void | Promise<void> {
+  if (process.env.ADMIN_AUTH_DISABLED === 'true') {
+    console.warn(
+      '[security] ADMIN_AUTH_DISABLED=true — tenant resolution bypassed, caller is treated as super-admin.'
+    );
+    const fakeTenantId = process.env.DEV_FAKE_TENANT_ID || '';
+    return (req, _res, next) => {
+      (req as AuthenticatedRequest).tenant = {
+        tenantId: fakeTenantId,
+        isSuperAdmin: true,
+      };
+      next();
+    };
+  }
+  return requireTenant;
+}
+
+/**
+ * Super-admin-only gate. Rejects unless req.tenant.isSuperAdmin is true.
+ * Chain as: requireAuth → requireTenant → requireSuperAdmin. Used for the
+ * Phase 5 onboarding endpoints (create tenant + user), the manual /api/poll
+ * trigger, and the bulk reprocess-failed endpoint — operations a regular
+ * tenant user should never be able to invoke.
+ */
+export function requireSuperAdmin(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (!req.tenant) {
+    res.status(401).json({
+      ok: false,
+      error:
+        'requireSuperAdmin called without req.tenant. Chain requireTenant before this middleware.',
+    });
+    return;
+  }
+  if (!req.tenant.isSuperAdmin) {
+    res.status(403).json({
+      ok: false,
+      error: 'This endpoint requires super-admin privileges.',
+    });
+    return;
+  }
+  next();
 }

@@ -22,8 +22,31 @@
 
 import { Router, type Request, type Response } from 'express';
 import { supabase } from '../services/supabase.js';
+import type { AuthenticatedRequest } from '../middleware/security.js';
 
 const router = Router();
+
+/**
+ * Phase 4 multi-tenancy helper: pull tenant context off the request, or
+ * error out with a 500 if the middleware chain somehow didn't attach it.
+ * Regular tenant users get scoped to their own tenant_id; super-admins
+ * get the full cross-tenant view.
+ */
+function requireTenantContext(
+  req: Request,
+  res: Response
+): { tenantId: string; isSuperAdmin: boolean } | null {
+  const tenant = (req as AuthenticatedRequest).tenant;
+  if (!tenant) {
+    res.status(500).json({
+      ok: false,
+      error:
+        'exportHistory handler reached without req.tenant — middleware wiring is broken.',
+    });
+    return null;
+  }
+  return tenant;
+}
 
 const STORAGE_BUCKET = 'production-files';
 
@@ -42,6 +65,9 @@ const SIGNED_URL_TTL_SECONDS = 60;
  */
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const tenant = requireTenantContext(req, res);
+    if (!tenant) return;
+
     const rawLimit = parseInt(String(req.query.limit ?? '50'), 10);
     const rawOffset = parseInt(String(req.query.offset ?? '0'), 10);
     const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 200);
@@ -61,6 +87,13 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (validType) {
       q = q.eq('export_type', typeFilter);
+    }
+
+    // Phase 4 multi-tenancy: regular tenant users see only their own
+    // history rows. Super-admins see every export across all tenants
+    // (useful for Caleb to audit client activity).
+    if (!tenant.isSuperAdmin) {
+      q = q.eq('tenant_id', tenant.tenantId);
     }
 
     const { data, count, error } = await q;
@@ -89,11 +122,18 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const { data, error } = await supabase
-      .from('exports')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+    const tenant = requireTenantContext(req, res);
+    if (!tenant) return;
+
+    let q = supabase.from('exports').select('*').eq('id', id);
+    // Phase 4 multi-tenancy: tenant users can only read their own rows;
+    // super-admins can fetch any row. We pull this out of the match spec
+    // so a cross-tenant id returns 404 (not found) rather than leaking
+    // the row's existence to the wrong user.
+    if (!tenant.isSuperAdmin) {
+      q = q.eq('tenant_id', tenant.tenantId);
+    }
+    const { data, error } = await q.maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Export not found' });
     return res.json({ ok: true, row: data });
@@ -120,11 +160,17 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.get('/:id/download', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const { data: row, error: selErr } = await supabase
-      .from('exports')
-      .select('file_path')
-      .eq('id', id)
-      .maybeSingle();
+    const tenant = requireTenantContext(req, res);
+    if (!tenant) return;
+
+    let q = supabase.from('exports').select('file_path, tenant_id').eq('id', id);
+    // Phase 4 multi-tenancy: scope the lookup to the caller's tenant unless
+    // super-admin, so a tenant user cannot download another tenant's export
+    // even if they happen to know the export id.
+    if (!tenant.isSuperAdmin) {
+      q = q.eq('tenant_id', tenant.tenantId);
+    }
+    const { data: row, error: selErr } = await q.maybeSingle();
 
     if (selErr) return res.status(500).json({ ok: false, error: selErr.message });
     if (!row || !row.file_path) {

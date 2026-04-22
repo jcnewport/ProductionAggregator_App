@@ -50,6 +50,15 @@ export interface ExportFilters {
   operatorIds?: string[];
   /** Optional: restrict to one or more well UUIDs */
   wellIds?: string[];
+  /**
+   * Phase 4 multi-tenancy: when provided, restricts results to rows where
+   * production_(monthly|daily).tenant_id matches. The route layer passes
+   * req.tenant.tenantId for regular users and OMITS this field for super-
+   * admins (who export across tenants). Callers must treat a missing value
+   * as "no tenant filter" — never "all tenants" — and enforce that decision
+   * at the route layer, not here.
+   */
+  tenantId?: string;
 }
 
 /**
@@ -171,6 +180,11 @@ async function queryProduction(
   }
   if (filters.wellIds && filters.wellIds.length > 0) {
     query = query.in('well_id', filters.wellIds);
+  }
+  // Phase 4 multi-tenancy: scope to a single tenant when the caller passed one.
+  // Super-admin callers OMIT tenantId so they can export across tenants.
+  if (filters.tenantId) {
+    query = query.eq('tenant_id', filters.tenantId);
   }
 
   // Bump default limit — Supabase caps at 1000 rows per select by default.
