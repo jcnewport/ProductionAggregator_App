@@ -152,17 +152,31 @@ const FUZZY_THRESHOLD = 0.85;
 // ─── Index loading ────────────────────────────────────────────────
 
 /**
- * Load every well + alias in one pass. Cheap — ~130 rows today, and even
- * at 10,000 wells this is still a ~1MB JSON payload and sub-second query.
- * Call this ONCE at the top of storeMonthlyRecords / storeDailyRecords
- * and reuse the index across every record in the batch.
+ * Load every well + alias in one pass, scoped to a single tenant. Cheap —
+ * ~130 rows today, and even at 10,000 wells this is still a ~1MB JSON payload
+ * and sub-second query. Call this ONCE at the top of storeMonthlyRecords /
+ * storeDailyRecords and reuse the index across every record in the batch.
+ *
+ * Phase 3 multi-tenancy: wells and well_name_aliases are tenant-scoped.
+ * We filter BOTH tables by `tenant_id` so a name/alias lookup for tenant A
+ * cannot accidentally match a well that belongs to tenant B. (The
+ * wells→aliases FK join is still a filter by alias.tenant_id; since we
+ * reject any alias whose joined well isn't present in the filtered wells
+ * set, we double-protect against cross-tenant leakage via the join.)
  */
-export async function loadResolverIndex(): Promise<ResolverIndex> {
+export async function loadResolverIndex(tenantId: string): Promise<ResolverIndex> {
+  if (!tenantId) {
+    throw new Error('loadResolverIndex requires a tenantId — resolver must be tenant-scoped.');
+  }
   const [wellsRes, aliasesRes] = await Promise.all([
-    supabase.from('wells').select('id, well_name, api10, api14, combocurve_well_id'),
+    supabase
+      .from('wells')
+      .select('id, well_name, api10, api14, combocurve_well_id')
+      .eq('tenant_id', tenantId),
     supabase
       .from('well_name_aliases')
-      .select('alias, wells(id, well_name, api10, api14, combocurve_well_id)'),
+      .select('alias, wells(id, well_name, api10, api14, combocurve_well_id)')
+      .eq('tenant_id', tenantId),
   ]);
 
   if (wellsRes.error) {
@@ -330,21 +344,33 @@ export function resolveWellByName(
  * Record a fuzzy match as an alias for next time. Called by productionStorage
  * AFTER the row has stored successfully. Best-effort — a failure here must
  * NEVER break the import (we log + move on).
+ *
+ * Phase 3 multi-tenancy: aliases are tenant-scoped. The unique constraint
+ * is (tenant_id, alias), so the same human-visible string can exist as an
+ * alias in multiple tenants pointing at different well_id rows.
  */
 export async function recordFuzzyAliasHit(
   originalQuery: string,
-  wellId: string
+  wellId: string,
+  tenantId: string
 ): Promise<void> {
+  if (!tenantId) {
+    console.warn(
+      `[wellNameResolver] recordFuzzyAliasHit called without tenantId — skipping (would violate NOT NULL).`
+    );
+    return;
+  }
   try {
     const { error } = await supabase
       .from('well_name_aliases')
       .upsert(
         {
+          tenant_id: tenantId,
           alias: originalQuery,
           well_id: wellId,
           source: 'auto-fuzzy-resolver',
         },
-        { onConflict: 'alias', ignoreDuplicates: true }
+        { onConflict: 'tenant_id,alias', ignoreDuplicates: true }
       );
     if (error) {
       console.warn(

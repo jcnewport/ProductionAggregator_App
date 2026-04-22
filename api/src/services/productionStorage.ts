@@ -26,6 +26,15 @@ import {
 } from './wellNameResolver.js';
 
 export interface StorageContext {
+  /**
+   * Tenant that owns every row written during this storage call. Resolved
+   * upstream in emailPoller from the message's Delivered-To → tenants.email_alias.
+   * Stamped on every insert (wells, production_daily, production_monthly,
+   * well_name_aliases, flagged_records). Wells and aliases are tenant-scoped
+   * (see migration 0004_multitenancy_phase3_unique_constraints.sql); operators
+   * are NOT (shared reference data).
+   */
+  tenantId: string;
   sourceEmailId: string;      // email_log.id (UUID)
   sourceFileName: string;     // Original attachment filename
   sourceStoragePath: string;  // Path in Supabase Storage
@@ -97,23 +106,31 @@ async function resolveCombocurveWellId(api10: string): Promise<number | null> {
 }
 
 /**
- * Upsert a well by API10. Returns its UUID.
- * Matching strategy: API10 is the authoritative key (unique constraint in DB).
- * If the well name drifts between reports, we keep the first-seen name but track
- * the alias in well_name_aliases (Phase 2).
+ * Upsert a well by (tenant_id, API10). Returns its UUID.
+ *
+ * Matching strategy: (tenant_id, API10) is the authoritative key — wells are
+ * tenant-scoped (Caleb's design, 2026-04-22). Two tenants can both have the
+ * same physical well with the same API10, and they will be stored as two
+ * separate well rows. The unique constraint enforcing this is
+ * `wells_tenant_api10_unique` (see migration 0004).
+ *
+ * If the well name drifts between reports, we keep the first-seen name but
+ * track the alias in well_name_aliases (also tenant-scoped).
  *
  * Catalog enrichment: on insert, AND on existing rows where combocurve_well_id
  * is null, we look up chosen_id from combocurve_wells and populate the column.
- * This keeps the 16-col ComboCurve export's "Well ID" field filled in
- * automatically as the catalog grows — no manual reconciliation step.
+ * combocurve_wells is shared reference data — not tenant-scoped — so the same
+ * chosen_id is reused across tenants for the same physical well.
  */
 async function upsertWell(
   record: ProductionRecord,
-  operatorId: string
+  operatorId: string,
+  tenantId: string
 ): Promise<string> {
   const { data: existing } = await supabase
     .from('wells')
     .select('id, well_name, combocurve_well_id')
+    .eq('tenant_id', tenantId)
     .eq('api10', record.api10)
     .maybeSingle();
 
@@ -124,11 +141,12 @@ async function upsertWell(
         .from('well_name_aliases')
         .upsert(
           {
+            tenant_id: tenantId,
             alias: record.wellName,
             well_id: existing.id,
             source: 'auto-detected-during-import',
           },
-          { onConflict: 'alias', ignoreDuplicates: true }
+          { onConflict: 'tenant_id,alias', ignoreDuplicates: true }
         );
     }
     // Backfill combocurve_well_id opportunistically. With the new resolver
@@ -160,6 +178,7 @@ async function upsertWell(
   const { data, error } = await supabase
     .from('wells')
     .insert({
+      tenant_id: tenantId,
       well_name: record.wellName,
       api10: record.api10,
       api14: record.api14,
@@ -236,6 +255,7 @@ function toRowShape(
   context: StorageContext
 ) {
   return {
+    tenant_id: context.tenantId,
     well_id: wellId,
     well_name: record.wellName,
     api14: record.api14,
@@ -316,7 +336,7 @@ async function hydrateMissingApis(
 
   let index: ResolverIndex;
   try {
-    index = await loadResolverIndex();
+    index = await loadResolverIndex(context.tenantId);
   } catch (err) {
     console.warn(
       `[productionStorage] well-name resolver index load failed from "${context.sourceFileName}": ` +
@@ -407,7 +427,7 @@ async function hydrateMissingApis(
     const unique = new Map<string, string>();
     for (const f of fuzzyWriteBacks) unique.set(f.query, f.wellId);
     for (const [query, wellId] of unique.entries()) {
-      await recordFuzzyAliasHit(query, wellId);
+      await recordFuzzyAliasHit(query, wellId, context.tenantId);
     }
   }
 
@@ -491,6 +511,7 @@ async function writeFlaggedRecords(
   if (skipped.length === 0) return;
   try {
     const rows = skipped.map(({ record, reason }) => ({
+      tenant_id: context.tenantId,
       email_log_id: context.sourceEmailId || null,
       source_file_name: context.sourceFileName,
       row_number: null, // parsers don't currently surface a row number
@@ -553,7 +574,7 @@ export async function storeMonthlyRecords(
 
   const apiToWellId = new Map<string, string>();
   for (const rec of uniqueByApi10.values()) {
-    const wellId = await upsertWell(rec, operatorId);
+    const wellId = await upsertWell(rec, operatorId, context.tenantId);
     apiToWellId.set(rec.api10, wellId);
   }
 
@@ -609,7 +630,7 @@ export async function storeDailyRecords(
 
   const apiToWellId = new Map<string, string>();
   for (const rec of uniqueByApi10.values()) {
-    const wellId = await upsertWell(rec, operatorId);
+    const wellId = await upsertWell(rec, operatorId, context.tenantId);
     apiToWellId.set(rec.api10, wellId);
   }
 

@@ -33,6 +33,15 @@ export interface EmailMessage {
   subject: string;
   receivedAt: Date;           // Internal timestamp from Gmail
   attachments: EmailAttachment[];
+  /**
+   * The tenant alias this message was addressed to, lowercased. Sourced first
+   * from Google Workspace's `Delivered-To` header (authoritative), then falling
+   * back to scanning the `To` header for any known alias. Used to route the
+   * message to the correct tenant (phase 3 multi-tenancy).
+   *
+   * Empty string when no match could be determined.
+   */
+  deliveredTo: string;
 }
 
 let oauthClient: OAuth2Client | null = null;
@@ -77,26 +86,50 @@ function headerValue(
 }
 
 /**
- * List unread messages that were addressed to the monitored alias AND have attachments.
+ * Escape an alias for use inside a Gmail `to:` search clause.
  *
- * IMPORTANT: GMAIL_MONITORED_EMAIL (e.g. S.IS_AD_Prod@stewardship.is) is an ALIAS that
- * delivers to the real authenticated mailbox (c@stewardship.is). All mail lives in the
- * real mailbox, so we filter by the "to:" header to pick out only the production reports.
- * This keeps the poller from ever touching personal mail in the same inbox.
+ * Gmail's query language does not need shell-style escaping for typical email
+ * addresses, but we wrap any alias containing whitespace in quotes to be safe.
+ */
+function formatToClause(alias: string): string {
+  const trimmed = alias.trim();
+  if (!trimmed) return '';
+  if (/\s/.test(trimmed)) return `to:"${trimmed}"`;
+  return `to:${trimmed}`;
+}
+
+/**
+ * List unread messages that were addressed to ANY of the supplied tenant
+ * aliases AND have attachments.
  *
- * Gmail search query:  to:{alias} is:unread has:attachment
+ * Each tenant in the product is configured with a unique alias of the form
+ * `s.is_<slug>_prod@stewardship.is`. All aliases deliver to the same real
+ * mailbox (`c@stewardship.is`), so we build a single OR query:
+ *
+ *     to:(alias1 OR alias2 OR ...) is:unread has:attachment
+ *
+ * This keeps the poller from ever touching personal mail in the same inbox
+ * and lets us route each message to the correct tenant via `Delivered-To`.
  */
 export async function listUnreadMessagesWithAttachments(
+  aliases: string[],
   maxResults = 25
 ): Promise<string[]> {
-  const monitored = process.env.GMAIL_MONITORED_EMAIL;
-  if (!monitored) {
+  const cleaned = aliases
+    .map((a) => (a ?? '').trim())
+    .filter((a) => a.length > 0);
+  if (cleaned.length === 0) {
     throw new Error(
-      'GMAIL_MONITORED_EMAIL env var is required — set it to the alias you want to monitor (e.g. S.IS_AD_Prod@stewardship.is).'
+      'listUnreadMessagesWithAttachments requires at least one tenant alias — pass the set of active tenant email_alias values.'
     );
   }
+
+  const clauses = cleaned.map(formatToClause).filter((c) => c.length > 0);
+  const toPart =
+    clauses.length === 1 ? clauses[0] : `(${clauses.join(' OR ')})`;
+  const q = `${toPart} is:unread has:attachment`;
+
   const gmail = getGmailClient();
-  const q = `to:${monitored} is:unread has:attachment`;
   const res = await gmail.users.messages.list({
     userId: 'me',
     q,
@@ -106,11 +139,52 @@ export async function listUnreadMessagesWithAttachments(
 }
 
 /**
+ * Resolve which tenant alias this message was delivered to.
+ *
+ * Google Workspace sets the `Delivered-To` header to the alias that actually
+ * received the message — this is the authoritative source. If for any reason
+ * that header is missing, fall back to scanning the `To` header (and `Cc`)
+ * for any alias we know about. If nothing matches, return `''`.
+ *
+ * All comparisons are lowercased since email addresses are case-insensitive.
+ */
+function resolveDeliveredTo(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+  knownAliases: Set<string>
+): string {
+  const rawDelivered = headerValue(headers, 'Delivered-To').trim().toLowerCase();
+  if (rawDelivered && knownAliases.has(rawDelivered)) {
+    return rawDelivered;
+  }
+
+  const scan = [
+    headerValue(headers, 'To'),
+    headerValue(headers, 'Cc'),
+    headerValue(headers, 'X-Original-To'),
+  ]
+    .filter(Boolean)
+    .join(',')
+    .toLowerCase();
+
+  for (const alias of knownAliases) {
+    if (alias && scan.includes(alias)) return alias;
+  }
+
+  // Last resort — return whatever Delivered-To said, even if not in the
+  // known set. The caller will treat an unknown alias as a skip.
+  return rawDelivered;
+}
+
+/**
  * Fetch a full message (with attachment bodies) by ID, and normalize into our internal
  * EmailMessage shape.
+ *
+ * `knownAliases` is the set of currently-active tenant aliases (lowercased).
+ * Used to resolve the message's `Delivered-To` for tenant routing.
  */
 export async function getMessageWithAttachments(
-  messageId: string
+  messageId: string,
+  knownAliases: Set<string>
 ): Promise<EmailMessage> {
   const gmail = getGmailClient();
   const res = await gmail.users.messages.get({
@@ -123,6 +197,7 @@ export async function getMessageWithAttachments(
   const headers = payload?.headers;
   const sender = headerValue(headers, 'From');
   const subject = headerValue(headers, 'Subject');
+  const deliveredTo = resolveDeliveredTo(headers, knownAliases);
   const internalDate = res.data.internalDate
     ? new Date(Number(res.data.internalDate))
     : new Date();
@@ -165,6 +240,7 @@ export async function getMessageWithAttachments(
     subject,
     receivedAt: internalDate,
     attachments,
+    deliveredTo,
   };
 }
 

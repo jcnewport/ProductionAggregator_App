@@ -32,6 +32,55 @@ import { maybeSendFailureAlert } from './notifications.js';
 const STORAGE_BUCKET = 'production-files';
 
 /**
+ * Tenant routing table — loaded fresh at the start of each polling pass.
+ *
+ * Phase 3 multi-tenancy: each tenant owns a unique `email_alias` column on
+ * `public.tenants`. Every inbound message is routed to its tenant by matching
+ * the `Delivered-To` header back to one of these aliases.
+ */
+export interface TenantRoute {
+  /** Lowercased aliases — passed to Gmail's `to:(...)` query filter. */
+  aliases: string[];
+  /** Lowercased alias → tenant_id. */
+  aliasToTenantId: Map<string, string>;
+}
+
+/**
+ * Load the active tenant routing table from Supabase. Inactive tenants are
+ * excluded — their mail will not be polled or stamped.
+ *
+ * Throws if no active tenants exist (the poller can't do anything useful
+ * without at least one alias to search for).
+ */
+export async function loadTenantRoutes(): Promise<TenantRoute> {
+  const { data, error } = await supabase
+    .from('tenants')
+    .select('id, email_alias, is_active')
+    .eq('is_active', true);
+  if (error) {
+    throw new Error(`Failed to load tenants for routing: ${error.message}`);
+  }
+
+  const aliases: string[] = [];
+  const aliasToTenantId = new Map<string, string>();
+  for (const row of data || []) {
+    const a = (row.email_alias || '').trim().toLowerCase();
+    if (!a || !row.id) continue;
+    aliases.push(a);
+    aliasToTenantId.set(a, row.id);
+  }
+
+  if (aliases.length === 0) {
+    throw new Error(
+      'No active tenants found. At least one row in public.tenants with is_active=true ' +
+        'and a non-empty email_alias is required for the poller to function.'
+    );
+  }
+
+  return { aliases, aliasToTenantId };
+}
+
+/**
  * Upload a raw attachment to Supabase Storage. Returns the storage path used.
  * Path convention: {YYYY}/{MM}/{messageId}_{safeFilename}
  */
@@ -61,11 +110,19 @@ async function uploadAttachmentToStorage(
 /**
  * Create an email_log row at the start of processing.
  * Returns the row's UUID so downstream parsed records can reference it as source_email_id.
+ *
+ * `tenantId` must be the tenant resolved from the message's Delivered-To header.
+ * email_log.tenant_id is NOT NULL (phase 1 multi-tenancy), so every write here
+ * is unconditionally stamped with the caller's tenant.
  */
-async function createEmailLogRow(message: EmailMessage): Promise<string> {
+async function createEmailLogRow(
+  message: EmailMessage,
+  tenantId: string
+): Promise<string> {
   const { data, error } = await supabase
     .from('email_log')
     .insert({
+      tenant_id: tenantId,
       gmail_message_id: message.id,
       sender: message.sender,
       subject: message.subject,
@@ -175,8 +232,21 @@ async function finalizeEmailLog(
 /**
  * Process a single email message end-to-end. Never throws — all errors are caught
  * and written to email_log so the poller loop keeps going.
+ *
+ * `tenantRoute` is optional: runPollingPass loads it once per pass and passes
+ * it down. Callers that only have a Gmail message id (retry worker, admin
+ * route) can omit it; we'll load the current routing table on demand.
+ *
+ * Tenant resolution:
+ *   1. Read the message's Delivered-To (authoritative) / To headers.
+ *   2. Look that alias up in tenantRoute.aliasToTenantId.
+ *   3. If no match → skip the message (we refuse to write tenant-less rows
+ *      because email_log.tenant_id is NOT NULL).
  */
-export async function processMessage(messageId: string): Promise<void> {
+export async function processMessage(
+  messageId: string,
+  tenantRoute?: TenantRoute
+): Promise<void> {
   let emailLogId: string | null = null;
   const errors: string[] = [];
   const ignoredNotes: string[] = [];
@@ -184,8 +254,26 @@ export async function processMessage(messageId: string): Promise<void> {
   let attachmentsIgnored = 0;
 
   try {
-    const message = await getMessageWithAttachments(messageId);
-    emailLogId = await createEmailLogRow(message);
+    const route = tenantRoute ?? (await loadTenantRoutes());
+    const knownAliases = new Set(route.aliases);
+    const message = await getMessageWithAttachments(messageId, knownAliases);
+
+    const alias = (message.deliveredTo || '').toLowerCase();
+    const tenantId = alias ? route.aliasToTenantId.get(alias) : undefined;
+    if (!tenantId) {
+      // Unknown or missing alias — we cannot stamp tenant_id on email_log.
+      // Log, leave the Gmail message unread so a human can investigate, and
+      // return without inserting anything.
+      console.warn(
+        `[emailPoller] Message ${messageId} could not be routed to a tenant. ` +
+          `Delivered-To='${message.deliveredTo}'. Known aliases=${JSON.stringify(
+            route.aliases
+          )}. Leaving message unread.`
+      );
+      return;
+    }
+
+    emailLogId = await createEmailLogRow(message, tenantId);
 
     // Clean slate for re-runs. If this is a reprocess (or a poller retry of
     // a message whose previous attempt failed), wipe any prior flagged rows
@@ -260,6 +348,7 @@ export async function processMessage(messageId: string): Promise<void> {
 
         // 3. Write parsed rows
         const context = {
+          tenantId,
           sourceEmailId: emailLogId,
           sourceFileName: attachment.filename,
           sourceStoragePath: storagePath,
@@ -339,12 +428,23 @@ export async function processMessage(messageId: string): Promise<void> {
 
 /**
  * Run one polling pass. Exported for manual triggering (e.g. admin route / CLI).
+ *
+ * Loads the active tenant-alias routing table once at the top of the pass,
+ * builds a single Gmail `to:(alias1 OR alias2 OR ...)` query, and routes each
+ * returned message to the correct tenant via its Delivered-To header.
  */
 export async function runPollingPass(): Promise<{ messagesProcessed: number }> {
-  const ids = await listUnreadMessagesWithAttachments(50);
-  console.log(`[emailPoller] Found ${ids.length} unread messages with attachments`);
+  const route = await loadTenantRoutes();
+  console.log(
+    `[emailPoller] Polling ${route.aliases.length} tenant alias(es): ` +
+      route.aliases.join(', ')
+  );
+  const ids = await listUnreadMessagesWithAttachments(route.aliases, 50);
+  console.log(
+    `[emailPoller] Found ${ids.length} unread messages with attachments`
+  );
   for (const id of ids) {
-    await processMessage(id);
+    await processMessage(id, route);
   }
   return { messagesProcessed: ids.length };
 }
