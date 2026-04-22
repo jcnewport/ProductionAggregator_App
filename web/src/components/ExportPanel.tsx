@@ -57,20 +57,31 @@ export default function ExportPanel({
   const [result, setResult] = useState<{ rowCount: number; wellCount: number; filename: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the operator list once on mount
+  // Load the operator list once on mount.
+  //
+  // We hide operators that have zero wells attached so the dropdown stays
+  // clean. The two "Various (…)" rows are kept in the DB as fallback landing
+  // spots for generic-format ingests, but they shouldn't appear in the filter
+  // until data actually lands there. The `!inner` hint on the wells join
+  // causes PostgREST to omit operators with no matching wells.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const { data, error: e } = await supabase
         .from('operators')
-        .select('id, name')
+        .select('id, name, wells!inner(id)')
         .order('name', { ascending: true });
       if (cancelled) return;
       if (e) {
         console.warn('[ExportPanel] Could not load operators:', e.message);
         return;
       }
-      setOperators((data ?? []) as Operator[]);
+      // Drop the wells array we only needed for the filter join.
+      const active = (data ?? []).map((op: { id: string; name: string }) => ({
+        id: op.id,
+        name: op.name,
+      }));
+      setOperators(active);
     })();
     return () => {
       cancelled = true;
