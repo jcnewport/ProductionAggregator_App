@@ -20,6 +20,8 @@ import DailyExportPage from './pages/DailyExportPage';
 import ExportHistoryPage from './pages/ExportHistoryPage';
 import LoginPage from './pages/LoginPage';
 import MonthlyExportPage from './pages/MonthlyExportPage';
+import OnboardingPage from './pages/OnboardingPage';
+import SuperAdminRoute from './auth/SuperAdminRoute';
 
 export default function App() {
   return (
@@ -34,6 +36,12 @@ export default function App() {
               <Route path="/export/monthly" element={<MonthlyExportPage />} />
               <Route path="/export/daily" element={<DailyExportPage />} />
               <Route path="/exports/history" element={<ExportHistoryPage />} />
+              {/* Super-admin surfaces — gated in the UI so tenant users
+                  never see the nav link, and gated on the server by
+                  requireSuperAdmin middleware. */}
+              <Route element={<SuperAdminRoute />}>
+                <Route path="/admin/onboarding" element={<OnboardingPage />} />
+              </Route>
             </Route>
           </Route>
 

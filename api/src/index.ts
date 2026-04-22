@@ -22,6 +22,7 @@ import exportHistoryRouter from './routes/exportHistory.js';
 import adminRouter from './routes/admin.js';
 import mappingsRouter from './routes/mappings.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
+import onboardingRouter from './routes/onboarding.js';
 import {
   adminLimiter,
   buildCorsOptions,
@@ -152,6 +153,25 @@ app.use(
   requireTenantMaybe(),
   requireSuperAdmin,
   mappingsRouter
+);
+
+// Multi-tenancy onboarding (Phase 5):
+//   POST /api/admin/onboarding/tenants                  create tenant
+//   GET  /api/admin/onboarding/tenants                  list tenants
+//   POST /api/admin/onboarding/tenants/:id/deactivate   soft-disable
+//   POST /api/admin/onboarding/tenants/:id/reactivate   re-enable
+//   POST /api/admin/onboarding/invite                   invite user + link to tenant
+//
+// Must be mounted BEFORE the generic /api/admin mount below for the same
+// reason as /api/admin/mappings: Express matches in registration order.
+// Super-admin only — same gate as /api/admin/*.
+app.use(
+  '/api/admin/onboarding',
+  adminLimiter,
+  requireAuthMaybe(),
+  requireTenantMaybe(),
+  requireSuperAdmin,
+  onboardingRouter
 );
 
 // Admin operations — reprocess failed emails, retry passes, alert sends.

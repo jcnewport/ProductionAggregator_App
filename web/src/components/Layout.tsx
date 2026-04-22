@@ -22,11 +22,18 @@ import { useAuth } from '../auth/AuthProvider';
 import LogoMark from './LogoMark';
 import { colors, radii, transitions } from '../theme';
 
+// Nav links shown to every authenticated user.
 const navLinks = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/export/monthly', label: 'Monthly Export', end: false },
   { to: '/export/daily', label: 'Daily Export', end: false },
   { to: '/exports/history', label: 'Export History', end: false },
+];
+
+// Nav links shown ONLY to super-admins (Caleb). Regular tenant users don't
+// see these. Gated in JSX below by session.isSuperAdmin.
+const adminNavLinks = [
+  { to: '/admin/onboarding', label: 'Admin', end: false },
 ];
 
 /** Initials for the user-avatar bubble in the top-right. Takes the first
@@ -45,7 +52,7 @@ function initialsFromEmail(email: string): string {
 }
 
 export default function Layout() {
-  const { session, signOut } = useAuth();
+  const { session, signOut, isSuperAdmin } = useAuth();
 
   const userEmail = session?.user?.email ?? '';
   const initials = initialsFromEmail(userEmail);
@@ -127,6 +134,20 @@ export default function Layout() {
                 {l.label}
               </NavLink>
             ))}
+            {/* Super-admin-only surfaces. The server enforces the real gate
+                (requireSuperAdmin middleware); this just hides the link so
+                tenant users don't see a dead-end "Admin" button. */}
+            {isSuperAdmin &&
+              adminNavLinks.map((l) => (
+                <NavLink
+                  key={l.to}
+                  to={l.to}
+                  end={l.end}
+                  className={({ isActive }) => 'sis-navlink' + (isActive ? ' active' : '')}
+                >
+                  {l.label}
+                </NavLink>
+              ))}
           </nav>
 
           {/* LIVE badge — Option B's pulsing indicator. Sits next to the nav
