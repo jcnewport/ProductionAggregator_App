@@ -33,6 +33,9 @@ import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
 import { pdsMewbourneDailyAdapter } from './pdsMewbourneDaily.js';
 import { pdsMewbourneMonthlyAdapter } from './pdsMewbourneMonthly.js';
 import { frioDailyProductionXlsxAdapter } from './frioDailyProductionXlsx.js';
+import { pdsMatadorMonthlyAdapter } from './pdsMatadorMonthly.js';
+import { pdsDiamondbackMonthlyAdapter } from './pdsDiamondbackMonthly.js';
+import { pdsDiversifiedMonthlyAdapter } from './pdsDiversifiedMonthly.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -114,87 +117,139 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
    * false-match risk against the Anadarko adapter above.
    * ──────────────────────────────────────────────────────────────── */
 
-  // ─── Format 1b — PDS Diamondback Monthly (STUB) ───
+  // ─── Format 1b — PDS Diamondback Monthly (IMPLEMENTED) ───
+  //
+  // Positional (x/y) extraction using the standard PDS-sibling pattern
+  // (pagerender override → 6-pt y-buckets → hardcoded 10-column plan →
+  // ±40 pt role-nearest-column assignment). Hardcoded column centers
+  // rather than header-row discovery because Diamondback's header is
+  // split across 3 y-lines (y=444 "Gas"/"Oil"/"Water" group headers,
+  // y=438 main labels, y=432 "Prod"/"Sales" subheaders) which would
+  // require cross-line label reconstruction. A runtime header-fingerprint
+  // check ("well name", "api", "ssi", "prod date", "days") fails loudly
+  // if Diamondback ever changes the layout.
+  //
+  // Field mapping:
+  //   Well Name  → wellName
+  //   API (10)   → api10 / api14 (right-padded "0000")
+  //   SSI        → operatorWellId (Diamondback's integer surrogate key —
+  //                unique in our PDS registry for fitting int32 cleanly)
+  //   Prod Date  → prodDate (normalized first-of-month)
+  //   Gas Prod   → gasProd
+  //   Oil Prod   → oilProd
+  //   Water Prod → waterProd
+  //   Gas Sales  → gasSales
+  //   Oil Sales  → oilSales
+  //   Days On    → daysOn
+  //
+  // Note Diamondback's column ORDER is (Gas Prod | Oil Prod) — inverted
+  // vs other PDS operators (Oil Prod | Gas Prod). Fixed x-centers capture
+  // this correctly.
   {
-    adapter: stubAdapter({
-      name: 'PDS Diamondback Monthly',
-      operatorName: 'Diamondback Energy',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@diamondbackenergy\.com$/i] as const,
-      // Diamondback-unique markers: the "production@diamondbackenergy.com"
-      // inquiry-contact line + the Diamondback-specific "SSI" header
-      // (a Diamondback-internal surrogate-key column that sits between
-      // Well Name and Oil Prod in their PDS feed). SSI header is unique
-      // among all PDS operators we've seen so far.
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(
-          ctx.pdfText,
-          /Monthly Production Estimates/i,
-          /PDS Well Data Exchange/i,
-          /production@diamondbackenergy\.com/i,
-        ),
-    }),
+    adapter: pdsDiamondbackMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-DIAMONDBACK-20260421-187003.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Diamondback Energy via Frio/West Pecos PDS feed. First seen 2026-04-21. Widened snippet shows ~10–11 column layout: API | Prod Date | Gas Prod | Water Prod | Gas Sales | Well Name | (Well Num?) | SSI | Oil Prod | Oil Sales | Days On — with Well Num possibly split from Well Name in the positional stream. 10-digit API ("42329..."). Full parser deferred until Task #79 or local sample PDF available.',
+      'Positional x/y extraction + hardcoded 10-column plan. Column order inverted vs other PDS operators (Gas Prod before Oil Prod). SSI (Diamondback surrogate key) → operatorWellId (int32). Days On captured. Detects on PDSWDX boilerplate + "production@diamondbackenergy.com" contact string. Validated against 2026-04-21 sample (both wells inactive, totals = 0).',
   },
 
-  // ─── Format 1c — PDS Matador Monthly (STUB) ───
+  // ─── Format 1c — PDS Matador Monthly (IMPLEMENTED) ───
+  //
+  // Positional (x/y) extraction with a LOOK-AHEAD MERGER — the distinctive
+  // Matador quirk is that each well's data lands across 2-3 y-buckets:
+  //   - Primary row: Well ID + Name + API + Date + SOME volumes
+  //   - 1-2 continuation rows: remaining volumes (6-12 pt below primary)
+  //   - Total row: "Total :" label + all volumes duplicated (skipped)
+  // The primary→continuation y-gap varies PER WELL (6 pt for SILVER 114H,
+  // 12 pt for SILVER 124H) so a fixed bucket size can't handle both.
+  // The merger walks rows top-down, classifies each as primary / partial /
+  // continuation / total / other, and absorbs continuations + partial
+  // primaries into the accumulator until it hits a Total or next primary.
+  //
+  // The partial-primary classification handles the SILVER 403H case where
+  // Well ID + (Name/API/Date/volumes) land on two different 6-pt buckets
+  // — neither row alone qualifies as a full primary but together they do.
+  //
+  // Field mapping:
+  //   Well ID                → extraFields.matadorWellId ("500002.828.01",
+  //                            dotted format can't fit integer operatorWellId)
+  //   Well Name              → wellName
+  //   API (14)               → api10 / api14
+  //   Prod Date              → prodDate (normalized first-of-month)
+  //   Gross Oil Production   → oilProd
+  //   Gross Oil Sales        → oilSales
+  //   Gross Gas Production   → gasProd
+  //   Gross Gas Sales        → gasSales
+  //   MMBTUSales             → extraFields.mmbtuSales (GAS HEAT CONTENT,
+  //                            NOT a sales volume — never maps to oilSales/gasSales)
+  //   Gross Water Production → waterProd
+  //
+  // Validation: totals match the PDF exactly across all 4 SILVER wells
+  // (oil=14,841.67, gas=49,571.68, water=53,568.16).
   {
-    adapter: stubAdapter({
-      name: 'PDS Matador Monthly',
-      operatorName: 'Matador Resources Company',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@matadorresources\.com$/i] as const,
-      // Matador-unique markers: operator name + Dallas HQ address
-      // ("5400 LBJ Freeway Suite 1500 Dallas, TX 75240") + the
-      // Matador-specific "MMBTU" heat-content column which no other
-      // PDS operator we support reports.
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(
-          ctx.pdfText,
-          /Monthly Production Estimates/i,
-          /PDS Well Data Exchange/i,
-          /Matador Resources Company/i,
-        ),
-    }),
+    adapter: pdsMatadorMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-MATADOR-20260421-187005.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Matador Resources via Frio PDS feed. First seen 2026-04-21. Column layout from widened snippet: Prod Date | Oil Prod | Oil Sales | Gas Prod | Gas Sales | Water Prod | Well ID | Well Name | API14 | MMBTU | Sales. Uses 14-digit API. Includes MMBTU (gas heat content) — unique to Matador in our registry. pdf-parse flat text concatenates trailing decimals without separators (same quirk BTA WIO had) — positional x/y extraction required. Deferred until Task #79.',
+      'Positional x/y + look-ahead merger (each well spans 2-3 y-buckets with variable spacing). MMBTUSales → extraFields (NOT a volume column). Matador Well ID "500002.828.01" → extraFields.matadorWellId (dotted, can\'t fit int operatorWellId). 14-digit API. Detects on "Matador Resources Company" + MMBTU signature. Validated against 2026-04-21 sample — 4 wells, totals match PDF exactly.',
   },
 
-  // ─── Format 1d — PDS Diversified Monthly (STUB) ───
+  // ─── Format 1d — PDS Diversified Monthly (IMPLEMENTED) ───
+  //
+  // Positional (x/y) extraction with a LOOK-BACK + LOOK-AHEAD MERGER —
+  // Diversified's layout has two y-split patterns per well:
+  //   Pattern A (~212 of 277 wells): Well ID + API + Date + volumes all
+  //     on one anchor bucket, subunit-name continuation 6 pt below.
+  //   Pattern B (~65 of 277 wells): Well ID alone on one bucket, then
+  //     API + Date + volumes 6 pt below on the anchor bucket, then
+  //     subunit-name continuation another 6 pt below.
+  // For each anchor row (valid Prod Date), we LOOK BACK 1 row for a lone
+  // Well ID above, and LOOK AHEAD up to 2 rows for the subunit-name tail
+  // and any straggling volume cells. Stops at the next anchor's Well ID
+  // or Prod Date so adjacent wells never bleed into each other.
+  //
+  // Other handled quirks:
+  //   1. Hyphenated API ("30-025-42724-00-00") → stripped to 14-digit
+  //      compact form before normalizeApi.
+  //   2. Well Name wraps to a subunit identifier line ("EAST VACUUM GBSA
+  //      UNIT" + "3202 514") which we concatenate.
+  //   3. Well Status column preserved in extraFields.wellStatus
+  //      (Producing / Service Well / Shut-In / Temporarily Abandone[d] /
+  //      Plugged & Abnd). Status can be text-truncated by pdf-parse — we
+  //      preserve verbatim rather than try to normalize.
+  //   4. 11-page multi-page report — header only on page 1, data continues
+  //      without header repetition. HARDCODED_COLUMN_PLAN applies globally.
+  //   5. Zero-volume rows (Service Wells, inactive wells) are EMITTED, not
+  //      dropped — they're valid records. Downstream filters decide export
+  //      inclusion based on Well Status.
+  //   6. Grand "TOTAL :" row at end-of-report lacks both Well ID and Prod
+  //      Date so the anchor gate naturally excludes it.
+  //
+  // Field mapping:
+  //   Well ID     → extraFields.diversifiedWellId ("1236430.01", dotted)
+  //   API (hyph)  → api10 / api14 (dashes stripped)
+  //   Well Name   → wellName (parent + subunit merged)
+  //   Prod Date   → prodDate (end-of-month "YYYY-MM-28" normalized to "YYYY-MM-01")
+  //   Oil Prod    → oilProd
+  //   Oil Sales   → oilSales
+  //   Gas Prod    → gasProd
+  //   Gas Sales   → gasSales
+  //   Water Prod  → waterProd
+  //   Well Status → extraFields.wellStatus
+  //
+  // Validation: 277 wells, totals match the PDF's "TOTAL :" footer EXACTLY
+  // (oil=60,059.44, gas=746,163.74, water=907,071.00).
+  //
+  // Ordering note: the detector ALSO requires "OilCum"/"GasCum" to be absent
+  // — XTO Monthly has a Well Status column too, but also has cumulative
+  // columns that Diversified never has. XTO's adapter sits later in the
+  // registry so Diversified matches first on Diversified-specific signals.
   {
-    adapter: stubAdapter({
-      name: 'PDS Diversified Monthly',
-      operatorName: 'Diversified Energy',
-      dataType: 'monthly',
-      fileKinds: ['pdf'] as const,
-      senderEmailPatterns: [/@frioenergypartners\.com$/i, /@div\.energy$/i] as const,
-      // Diversified-unique markers: operator name + OKC HQ address
-      // ("100 East Main Street Oklahoma City, OK 73104") + the
-      // "Well Status" column (Producing / Temporarily Abandoned /
-      // Shut In), which XTO also has but XTO is already caught earlier.
-      // Combined with the PDSWDX boilerplate this is specific enough.
-      detect: (ctx) =>
-        !!ctx.pdfText &&
-        hasAll(
-          ctx.pdfText,
-          /Monthly Production Estimates/i,
-          /PDS Well Data Exchange/i,
-          /Diversified Energy/i,
-        ),
-    }),
+    adapter: pdsDiversifiedMonthlyAdapter,
     sampleFile: 'PDSWDX-MP-DIVERSIFIED-20260421-187004.pdf',
-    status: 'stub',
+    status: 'implemented',
     notes:
-      'Diversified Energy via Frio PDS feed. First seen 2026-04-21. Column layout from widened snippet: API (hyphenated 14-digit like "30-025-42724-00-00") | Well ID | Oil Prod | Gas Prod | Prod Date | Oil Sales | Gas Sales | Water Prod | Well Name | Well Status. No pressure, choke, or downtime columns. Many wells marked "Temporarily Abandoned" with mixed zero/non-zero volumes — must preserve non-zero rows. Deferred until Task #79.',
+      'Positional x/y + look-back/look-ahead merger. 2 y-split patterns per well (anchor with/without Well ID above). Hyphenated 14-digit API stripped of dashes. Well Name concatenates parent + subunit line. Well Status → extraFields (Service/Producing/Shut-In/Abandone[d]/Plugged). Zero-volume Service Wells emit as valid records. Validated against 2026-04-21 sample — 277 wells, totals match PDF grand total exactly (oil=60,059.44 gas=746,163.74 water=907,071.00).',
   },
 
   // ─── Format 2 — PDS EOG Monthly (IMPLEMENTED) ───
