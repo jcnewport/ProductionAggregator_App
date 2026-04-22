@@ -398,7 +398,7 @@ export async function parsePdsAnadarkoDailyPdf(
 
 export const pdsAnadarkoDailyAdapter: FormatAdapter = {
   name: 'PDS Anadarko Daily',
-  operatorName: 'Anadarko Petroleum (Oxy)',
+  operatorName: 'OXY',
   dataType: 'daily',
   fileKinds: ['pdf'],
   senderEmailPatterns: [

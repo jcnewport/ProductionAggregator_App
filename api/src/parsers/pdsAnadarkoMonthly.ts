@@ -217,7 +217,7 @@ export async function parseAnadarkoMonthlyPdf(
  */
 export const pdsAnadarkoMonthlyAdapter: FormatAdapter = {
   name: 'PDS Anadarko Monthly',
-  operatorName: 'Anadarko (Oxy)',
+  operatorName: 'OXY',
   dataType: 'monthly',
   fileKinds: ['pdf'] as const,
   // Frio Energy distributes Anadarko data; any email from a @frioenergy.com or

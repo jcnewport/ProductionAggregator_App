@@ -399,7 +399,7 @@ function isHeaderLabel(s: string): boolean {
 
 export const pdsConocoPhillipsDailyAdapter: FormatAdapter = {
   name: 'PDS ConocoPhillips Daily',
-  operatorName: 'ConocoPhillips (Concho)',
+  operatorName: 'ConocoPhillips',
   dataType: 'daily',
   fileKinds: ['pdf'],
   senderEmailPatterns: [

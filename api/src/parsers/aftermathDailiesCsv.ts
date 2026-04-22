@@ -311,7 +311,7 @@ export function parseAftermathCsv(csvText: string): ProductionRecord[] {
 
 export const aftermathDailiesCsvAdapter: FormatAdapter = {
   name: 'Aftermath Dailies CSV',
-  operatorName: 'Aftermath (Concho/ConocoPhillips)',
+  operatorName: 'ConocoPhillips',
   dataType: 'daily',
   fileKinds: ['csv'] as const,
   // Aftermath doesn't send from a stable @aftermath domain in our samples —
