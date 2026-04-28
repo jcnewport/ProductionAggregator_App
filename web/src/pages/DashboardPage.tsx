@@ -6,14 +6,15 @@
  *   - A connected 4-stat bar (single bordered card with dividers between
  *     stats) topped with mini sparklines
  *   - A subtle hover-lift on cards (className="sis-hover-lift" — Option A)
- *   - A pulsing "LIVE · auto-refresh 60s" indicator on the Recent Activity
+ *   - A pulsing "LIVE · auto-refresh 15m" indicator on the Recent Activity
  *     card (className="sis-live-dot" — Option B)
  *
  * Three sections:
  *   1. Summary stats (monthly rows, daily rows, last-email-received, rows flagged)
  *   2. Flagged imports + row-level rejections
- *   3. Recent email processing activity (auto-refreshes every 60s while the
- *      tab is active so Caleb's dashboard stays warm without clicking Refresh)
+ *   3. Recent email processing activity (auto-refreshes every 15 minutes while
+ *      the tab is active so Caleb's dashboard stays warm without clicking
+ *      Refresh; manual Refresh in the header is always available for on-demand)
  *
  * Everything is read directly from Supabase via the authenticated session —
  * no custom API endpoint needed. If/when multi-tenancy is added, RLS filters
@@ -60,9 +61,11 @@ interface FlaggedRow {
 }
 
 /** How often the dashboard silently re-fetches to keep the Recent Activity
- * table warm. 60s feels "live" without hammering Supabase. Paused when the
- * tab isn't visible to avoid wasted round-trips. */
-const AUTO_REFRESH_MS = 60_000;
+ * table warm. 15 min keeps the view fresh without hammering Supabase or
+ * burning quota — operators only send a couple of emails a day, so a faster
+ * cadence buys nothing. Manual Refresh in the header is always available
+ * for an on-demand pull. Paused when the tab isn't visible. */
+const AUTO_REFRESH_MS = 15 * 60 * 1000; // 15 minutes
 
 export default function DashboardPage() {
   const [recent, setRecent] = useState<EmailLogRow[]>([]);
@@ -79,7 +82,7 @@ export default function DashboardPage() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
 
   // Nonce bumped when we need to re-fetch (after a Retry Now click, manual
-  // refresh, or the 60s auto-refresh tick).
+  // refresh, or the 15-minute auto-refresh tick).
   const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
@@ -263,7 +266,7 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* Recent activity — auto-refreshes every 60s */}
+      {/* Recent activity — auto-refreshes every 15 minutes */}
       <Card
         title="Recent email processing activity"
         subtitle="Most recent 20 messages delivered to the production inbox."
@@ -379,13 +382,13 @@ function Card({
 }
 
 /**
- * LiveIndicator — pulsing teal dot + "Live · auto-refresh 60s". The heartbeat
+ * LiveIndicator — pulsing teal dot + "Live · auto-refresh 15m". The heartbeat
  * of the dashboard. Shows the relative time of the last refresh in a tooltip.
  */
 function LiveIndicator({ lastRefreshedAt }: { lastRefreshedAt: Date | null }) {
   const tooltip = lastRefreshedAt
     ? `Last refreshed ${lastRefreshedAt.toLocaleTimeString()}`
-    : 'Refreshing every 60 seconds';
+    : 'Refreshing every 15 minutes';
   return (
     <span
       title={tooltip}
@@ -404,7 +407,7 @@ function LiveIndicator({ lastRefreshedAt }: { lastRefreshedAt: Date | null }) {
       }}
     >
       <span className="sis-live-dot" style={{ backgroundColor: colors.success }} />
-      Live · auto-refresh 60s
+      Live · auto-refresh 15m
     </span>
   );
 }
