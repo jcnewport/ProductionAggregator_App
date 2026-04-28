@@ -36,6 +36,9 @@ import { frioDailyProductionXlsxAdapter } from './frioDailyProductionXlsx.js';
 import { pdsMatadorMonthlyAdapter } from './pdsMatadorMonthly.js';
 import { pdsDiamondbackMonthlyAdapter } from './pdsDiamondbackMonthly.js';
 import { pdsDiversifiedMonthlyAdapter } from './pdsDiversifiedMonthly.js';
+import { pdsDiamondbackDailyAdapter } from './pdsDiamondbackDaily.js';
+import { pdsMatadorDailyAdapter } from './pdsMatadorDaily.js';
+import { pdsDiversifiedDailyAdapter } from './pdsDiversifiedDaily.js';
 
 /* ────────────────────────────────────────────────────────────────
  * Stub factory — builds a placeholder adapter that can DETECT its
@@ -471,6 +474,126 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     status: 'implemented',
     notes:
       'Positional x/y extraction. 14 mapped columns (of 17 visible). BeginOil/EndOil tank-gauge columns and Producing Status are deliberately DROPPED (not in column plan → outside ±15 pt tolerance of any mapped column). Sequential-proximity row clustering (4 pt) + orphan-merge pass for downtime-reason text wraps. 10-digit API padded to 14. Detect requires BeginOil + EndOil markers and excludes all other PDS operators.',
+  },
+
+  // ─── Format 5e — PDS Diamondback Daily (IMPLEMENTED) ───
+  //
+  // Daily counterpart to Format 1b (Diamondback Monthly). First seen
+  // 2026-04-28 — until that date Diamondback only forwarded MONTHLY
+  // reports. The Daily layout shares essentially nothing with the
+  // Monthly: 12 columns instead of 10, no Sales columns, an extra
+  // free-text "Downtime Reason" column, an extra "Hours Flowed" column,
+  // and Gas Prod sits BEFORE Oil Prod (vs Monthly's inverted order
+  // already inverted from other PDS Monthly siblings — daily restores
+  // the EOG/Mewbourne convention of Gas first).
+  //
+  // Strongest detection signal: "Hours Flowed" header — no other PDS
+  // daily we ingest reports it.
+  //
+  // Field mapping:
+  //   Well ID (10-digit)  → operatorWellId
+  //   API (10-digit)      → api10/api14 (pad with "0000")
+  //   Well Name           → wellName
+  //   Prod Date           → prodDate
+  //   Gas Prod / Oil Prod / Water Prod → corresponding volumes
+  //   Tubing PSI / Casing PSI          → tubingPres / casingPres
+  //   Hours Flowed                     → extraFields.hoursFlowed
+  //   Hours Down                       → hoursDown
+  //   Downtime Reason                  → downtimeReason
+  //
+  // Per-row continuation: Downtime Reason wraps to next y-line ("FRAC"
+  // alone after "SHUT IN FOR OFFSET "); the 16-pt row bucket merges
+  // them. Letter-content override at x>=660 force-routes wrapped text
+  // to downtimeReason.
+  //
+  // Empty-report tolerance: like Mewbourne Daily, returns [] (success
+  // with 0 rows) if the PDF has zero date-shaped tokens — i.e. an
+  // operator-emitted no-data report — instead of throwing.
+  {
+    adapter: pdsDiamondbackDailyAdapter,
+    sampleFile: 'PDSWDX-DP-DIAMONDBACK-20260428-187003.pdf',
+    status: 'implemented',
+    notes:
+      'Positional x/y extraction. 12 columns. Hardcoded column-center plan; 16-pt row bucket merges 2-pt sub-row splits and downtime-reason text wraps. 10-digit Well ID + 10-digit API. Hours Flowed in extraFields (no template column). Detect requires "Hours Flowed" + Diamondback boilerplate and excludes all other PDS operators. First seen 2026-04-28.',
+  },
+
+  // ─── Format 5f — PDS Matador Daily (IMPLEMENTED) ───
+  //
+  // Daily counterpart to Format 1c (Matador Monthly). First seen
+  // 2026-04-28. Same operator, completely different layout: 12 columns
+  // vs Monthly's 10, NO MMBTU column, ADD Casing Pres / Tubing Pres /
+  // Choke columns, and the API arrives in HYPHENATED 10-digit form
+  // ("30-025-51289") rather than Monthly's bare 14-digit.
+  //
+  // Same multi-row-per-record pattern as Monthly — each well-day's
+  // values split across 2 y-buckets that drift between rows. Re-uses
+  // the look-ahead merger algorithm from Matador Monthly with daily-
+  // calibrated parameters: 2-pt y-buckets, 6-pt look-ahead window
+  // (vs Monthly's 6-pt buckets and 36-pt window).
+  //
+  // Field mapping:
+  //   Well ID (dotted "500002.828.01") → extraFields.matadorWellId
+  //   Well Name                        → wellName
+  //   API (hyphenated 10-digit)        → api10/api14 (pad with "0000")
+  //   Prod Date                        → prodDate
+  //   Casing Pressure                  → casingPres
+  //   Tubing Pressure                  → tubingPres
+  //   Choke (decimal "0.31" or whole)  → choke (string)
+  //   Gross Oil Prod./Sales            → oilProd / oilSales
+  //   Gross Gas Prod./Sales            → gasProd / gasSales
+  //   Gross Water Production           → waterProd
+  //
+  // Detect requires daily header + Matador name + Choke header AND
+  // explicitly excludes "Monthly Production Estimates" and "MMBTU"
+  // (Monthly tells), plus the other PDS operators.
+  {
+    adapter: pdsMatadorDailyAdapter,
+    sampleFile: 'PDSWDX-DP-MATADOR-20260428-187005.pdf',
+    status: 'implemented',
+    notes:
+      'Positional x/y + look-ahead merger (calibrated for daily 2-pt splits, 6-pt window). 12 columns. Hyphenated 10-digit API → bare 10-digit → api14 padded. Dotted Well ID → extraFields.matadorWellId. Choke as text (preserves "0.31" decimal). NO MMBTU column on daily (vs monthly). First seen 2026-04-28.',
+  },
+
+  // ─── Format 5g — PDS Diversified Daily (IMPLEMENTED) ───
+  //
+  // Daily counterpart to Format 1d (Diversified Monthly). First seen
+  // 2026-04-28. 15 columns vs Monthly's 10 — adds Tubing Pres, Casing
+  // Pres, Choke, Hrs Down, Comments. API format also differs: Daily
+  // uses BARE 10-digit ("3002526927"), Monthly uses HYPHENATED
+  // ("30-025-42711-00-00"). API format itself becomes part of the
+  // Daily-vs-Monthly tell.
+  //
+  // Same row-split pattern as Monthly with an additional twist: even
+  // the Prod Date sits 2 pt below the API/WellID anchor on most wells.
+  // Multi-line wellName + multi-line Well Status ("Service " + "Well",
+  // "Temporarily " + "Abandoned") concatenate via look-ahead merge.
+  //
+  // Service Wells (no volumes), Shut-In wells, and Plugged & Abandoned
+  // wells are emitted as zero-volume records — they're real production
+  // records reporting no daily volume. Downstream filters can decide
+  // export inclusion based on Well Status.
+  //
+  // Field mapping:
+  //   API (10-digit bare) → api10 / api14
+  //   Well ID (dotted)    → extraFields.diversifiedWellId
+  //   Well Name           → wellName (parent + subunit concatenated)
+  //   Prod Date           → prodDate
+  //   Oil/Gas/Water Prod  → corresponding volumes
+  //   Oil Sales / Gas Sale → oilSales / gasSales
+  //   Well Status         → extraFields.wellStatus
+  //   Tubing/Casing Pres. → tubingPres / casingPres
+  //   Choke               → choke (string)
+  //   Hrs Down            → hoursDown
+  //   Comments            → downtimeReason + extraFields.comments
+  //
+  // Detect requires Hrs Down + Comments headers (Monthly has neither)
+  // AND explicitly excludes Monthly + other operators.
+  {
+    adapter: pdsDiversifiedDailyAdapter,
+    sampleFile: 'PDSWDX-DP-DIVERSIFIED-20260428-187004.pdf',
+    status: 'implemented',
+    notes:
+      'Positional x/y + anchor-walk with look-back 1 + look-ahead 3 row merger. 15 columns. 10-digit BARE API (vs Monthly hyphenated). Dotted Well ID → extraFields.diversifiedWellId. Multi-line wellName + status concatenated. Service Wells / Shut-In emitted as zero-volume records. 74-page report supported. First seen 2026-04-28.',
   },
 
   // ─── Format 6 — Aftermath Dailies CSV (IMPLEMENTED) ───

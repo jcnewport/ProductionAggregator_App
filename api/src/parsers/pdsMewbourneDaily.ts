@@ -343,6 +343,28 @@ export async function parsePdsMewbourneDailyPdf(buf: Buffer): Promise<Production
   }
 
   if (records.length === 0) {
+    // Distinguish two zero-record cases:
+    //   (a) Genuinely empty report — the PDF has 0 items shaped like
+    //       a Prod Date ("YYYY-MM-DD"). Mewbourne's footer states it
+    //       "only provides Daily production for the first 2 years of
+    //       the life of the well," so when every well in a particular
+    //       statement is older than that, the operator emits a header-
+    //       only PDF with empty "Total :" rows. This is a SUCCESS, not
+    //       a parse failure — return [] and let the dispatcher record
+    //       the email as completed-with-zero-rows.
+    //   (b) Layout drift — date-shaped items DID exist but our column
+    //       plan failed to pair them with volumes. THIS is a real
+    //       parser problem; throw so the email is flagged.
+    const dateCandidateCount = items.filter((it) =>
+      PROD_DATE_RE.test(it.str.trim())
+    ).length;
+
+    if (dateCandidateCount === 0) {
+      // Empty Mewbourne report — wells are >2 years old, no daily data.
+      // Returning [] is correct: dispatcher emits 'parsed' with 0 records.
+      return [];
+    }
+
     const detail =
       skipped.length > 0
         ? ` Skipped: ${skipped.slice(0, 3).join(' | ')}${
@@ -350,7 +372,8 @@ export async function parsePdsMewbourneDailyPdf(buf: Buffer): Promise<Production
           }`
         : '';
     throw new Error(
-      `PDS Mewbourne Daily: produced 0 records — layout may have changed.${detail}`
+      `PDS Mewbourne Daily: produced 0 records but ${dateCandidateCount} ` +
+        `date-shaped tokens found — layout may have changed.${detail}`
     );
   }
 
