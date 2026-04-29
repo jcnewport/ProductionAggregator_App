@@ -19,6 +19,20 @@
  * Everything is read directly from Supabase via the authenticated session —
  * no custom API endpoint needed. If/when multi-tenancy is added, RLS filters
  * will constrain results without any frontend change.
+ *
+ * Refresh behavior (changed 2026-04-29):
+ *   - The header "Refresh" button does TWO things in sequence:
+ *       1. POSTs to /api/poll, which triggers runPollingPass() on the backend
+ *          (the same function the 15-min cron runs). Pulls anything new from
+ *          Gmail and writes it to email_log + production_*.
+ *       2. Re-reads the database so any new rows surface in the UI.
+ *     This was a deliberate UX choice: "Refresh" should mean "show me the
+ *     latest" — and "the latest" includes mail that hasn't been polled yet.
+ *     The button is super-admin gated by /api/poll itself; if a non-admin
+ *     ever sees it, they get a clear error toast.
+ *   - The 15-min auto-refresh tick still ONLY re-reads the DB. It doesn't
+ *     trigger a poll, because the cron is already polling on its own
+ *     schedule and we don't want to double up.
  */
 
 import { useEffect, useState } from 'react';
@@ -84,6 +98,16 @@ export default function DashboardPage() {
   // Nonce bumped when we need to re-fetch (after a Retry Now click, manual
   // refresh, or the 15-minute auto-refresh tick).
   const [reloadTick, setReloadTick] = useState(0);
+
+  // Manual-refresh state. isRefreshing gates the button so it can't be
+  // double-clicked while a poll is in flight; refreshResult is a transient
+  // status message we show in the header for ~6 seconds after the refresh
+  // completes so Caleb has confirmation of what just happened.
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshResult, setRefreshResult] = useState<
+    | { tone: 'success' | 'info' | 'danger'; message: string }
+    | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +198,77 @@ export default function DashboardPage() {
     return () => window.clearInterval(id);
   }, []);
 
-  const handleRefresh = () => setReloadTick((n) => n + 1);
+  // Internal "just re-read the DB" — used by the auto-refresh tick (which
+  // doesn't poll Gmail because the backend cron is already doing that on
+  // its own schedule) and by manual refresh after the poll finishes.
+  const reloadFromDb = () => setReloadTick((n) => n + 1);
+
+  /**
+   * Manual Refresh — does both halves of "show me the latest":
+   *   1. POSTs to /api/poll, which triggers runPollingPass() on the backend.
+   *      That goes out to Gmail, downloads any new attachments, runs them
+   *      through the parsers, and writes the results to email_log +
+   *      production_*. Same function the 15-min cron runs.
+   *   2. Re-reads the database so any new rows surface in the UI.
+   *
+   * Returns in 5–20 seconds typically (most of that is the Gmail round-trip
+   * + parsing). Toast in the header confirms what happened: "Found 2 new
+   * messages" or "Inbox is clear — no new messages."
+   *
+   * The endpoint is requireSuperAdmin-gated on the backend. If a non-admin
+   * ever clicks this, we surface the 403 as a user-facing error. The 15-min
+   * auto-refresh tick deliberately does NOT call /api/poll — it just re-reads
+   * the DB — to avoid doubling up on the cron's polling schedule.
+   */
+  async function handleRefresh() {
+    setIsRefreshing(true);
+    setRefreshResult(null);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token ?? '';
+
+      const resp = await fetch('/api/poll', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      const json = await resp.json();
+      if (!resp.ok || json.ok === false) {
+        throw new Error(json.error || `HTTP ${resp.status}`);
+      }
+      const n = json.messagesProcessed ?? 0;
+      setRefreshResult({
+        tone: n > 0 ? 'success' : 'info',
+        message:
+          n === 0
+            ? 'Inbox is clear — no new messages.'
+            : `Found ${n} new message${n === 1 ? '' : 's'}.`,
+      });
+      // Pull the freshly-written rows into the dashboard tables.
+      reloadFromDb();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRefreshResult({
+        tone: 'danger',
+        message: `Couldn't reach the inbox: ${msg}`,
+      });
+      // Even on poll failure, do a DB re-read so at least the rest of the
+      // dashboard reflects the most recent state.
+      reloadFromDb();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
+  // Auto-clear the result toast after ~6 seconds so it doesn't hang
+  // around forever on a quiet morning.
+  useEffect(() => {
+    if (!refreshResult) return;
+    const id = window.setTimeout(() => setRefreshResult(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [refreshResult]);
 
   return (
     <div className="sis-stagger" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -183,6 +277,8 @@ export default function DashboardPage() {
         subtitle="Live view of inbox processing, flagged imports, and stored production totals."
         onRefresh={handleRefresh}
         loading={loading}
+        refreshing={isRefreshing}
+        refreshResult={refreshResult}
       />
 
       {err && <ErrorBanner message={err} />}
@@ -243,7 +339,7 @@ export default function DashboardPage() {
         ) : flagged.length === 0 ? (
           <EmptyState message="All clear." detail="No failed or partial imports in the recent activity log." />
         ) : (
-          <EmailLogTable rows={flagged} showErrors={true} onRetrySuccess={handleRefresh} />
+          <EmailLogTable rows={flagged} showErrors={true} onRetrySuccess={reloadFromDb} />
         )}
       </Card>
 
@@ -275,7 +371,7 @@ export default function DashboardPage() {
         {loading ? (
           <SkeletonRow />
         ) : (
-          <EmailLogTable rows={recent} showErrors={false} onRetrySuccess={handleRefresh} />
+          <EmailLogTable rows={recent} showErrors={false} onRetrySuccess={reloadFromDb} />
         )}
       </Card>
     </div>
@@ -291,12 +387,50 @@ function PageHeader({
   subtitle,
   onRefresh,
   loading,
+  refreshing,
+  refreshResult,
 }: {
   title: string;
   subtitle: string;
   onRefresh: () => void;
   loading: boolean;
+  refreshing: boolean;
+  refreshResult: { tone: 'success' | 'info' | 'danger'; message: string } | null;
 }) {
+  // Toast colour map — uses the same semantic colour tokens as the rest
+  // of the dashboard so it doesn't stand out as a one-off design.
+  const toastPalette: Record<
+    'success' | 'info' | 'danger',
+    { bg: string; fg: string; border: string }
+  > = {
+    success: {
+      bg: `${colors.success}18`,
+      fg: colors.success,
+      border: `${colors.success}40`,
+    },
+    info: {
+      bg: `${colors.info}18`,
+      fg: '#1d6a89',
+      border: `${colors.info}40`,
+    },
+    danger: {
+      bg: colors.dangerBg,
+      fg: colors.danger,
+      border: `${colors.danger}40`,
+    },
+  };
+
+  // Three button states:
+  //   - "Refresh"      idle
+  //   - "Checking…"    while the Gmail poll is in flight
+  //   - "Refreshing…"  while the post-poll DB read is in flight
+  // We pick the most informative label for whatever's happening right now.
+  const buttonLabel = refreshing
+    ? 'Checking…'
+    : loading
+    ? 'Refreshing…'
+    : 'Refresh';
+
   return (
     <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: '16px' }}>
       <div>
@@ -313,14 +447,44 @@ function PageHeader({
         </h2>
         <p style={{ margin: '6px 0 0 0', color: colors.textMuted, fontSize: '14px' }}>{subtitle}</p>
       </div>
-      <button
-        onClick={onRefresh}
-        disabled={loading}
-        className="sis-btn sis-btn-secondary"
-        style={{ whiteSpace: 'nowrap' }}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px',
+          flexShrink: 0,
+        }}
       >
-        {loading ? 'Refreshing…' : 'Refresh'}
-      </button>
+        <button
+          onClick={onRefresh}
+          disabled={loading || refreshing}
+          className="sis-btn sis-btn-secondary"
+          style={{ whiteSpace: 'nowrap' }}
+          title="Check the inbox for new emails and reload the dashboard. Takes 5–20 seconds."
+        >
+          {buttonLabel}
+        </button>
+        {refreshResult && (
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              backgroundColor: toastPalette[refreshResult.tone].bg,
+              color: toastPalette[refreshResult.tone].fg,
+              border: `1px solid ${toastPalette[refreshResult.tone].border}`,
+              borderRadius: radii.pill,
+              padding: '6px 14px',
+              fontSize: '12px',
+              fontWeight: 600,
+              maxWidth: '420px',
+              textAlign: 'right',
+            }}
+          >
+            {refreshResult.message}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
