@@ -32,3 +32,5 @@ Monitors a Gmail inbox for operator production reports (Excel/PDF), parses them 
 3. Fill in your Supabase and Gmail API credentials
 4. Run `npm install` from root
 5. Run `npm run dev:api` and `npm run dev:web`
+
+<!-- Cowork verified push access on 2026-04-29. -->
