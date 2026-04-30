@@ -1,27 +1,3 @@
-process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
-  console.error('=== UNCAUGHT EXCEPTION ===');
-  console.error('Message:', err.message);
-  console.error('Stack:', err.stack);
-  console.error('Code:', err.code);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('=== UNHANDLED REJECTION ===');
-  console.error('Reason:', reason);
-  process.exit(1);
-});
-
-console.log('=== ENV CHECK ===');
-console.log('DATABASE_URL set:', !!process.env.DATABASE_URL);
-console.log('DATABASE_URL length:', process.env.DATABASE_URL?.length);
-console.log('DATABASE_URL host:', process.env.DATABASE_URL?.split('@')[1]?.split('/')[0]);
-console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
-console.log('SUPABASE_ANON_KEY set:', !!process.env.SUPABASE_ANON_KEY);
-console.log('SUPABASE_SERVICE_ROLE_KEY set:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('=================');
-
 /**
  * ProductionAggregator API Server
  *
