@@ -323,6 +323,68 @@ const combocurveWellCatalog: NonProductionFilter = {
 };
 
 /**
+ * Peloton WellView — Daily Drilling Report (PDF)
+ * ----------------------------------------------
+ * Peloton WellView is a drilling/completions data management platform that
+ * Frio (and many operators) use to distribute daily rig-floor reports while
+ * a well is being drilled. The reports cover AFE costs, casing strings, mud
+ * checks, drilling parameters (ROT/WOB/GPM), and rig time-logs — NOT
+ * production volumes.
+ *
+ * They land in the inbox forwarded by Aaron with subject lines like:
+ *   "Fwd: Daily Drilling - Peloton WellView Report Distribution"
+ * with one PDF per well-day under filenames like "<Well Name> <Wellbore>.pdf".
+ *
+ * These should be CLEANLY IGNORED, not flagged for review:
+ *   - There's no production parser to add — the file has no production data.
+ *   - They're sent regularly per active rig — they'd otherwise pile up in
+ *     the flagged queue forever, drowning out genuine new operator formats
+ *     that need a real parser.
+ *
+ * Detection signature (PDF only):
+ *   1. PDF text contains "Peloton" (the platform vendor — branded on every
+ *      page header), AND
+ *   2. PDF text contains EITHER "Daily Drilling" OR "Mud Checks" — both are
+ *      exclusive to drilling/completions reports. No production report ever
+ *      contains either string.
+ *
+ * Conservative-by-design: requires BOTH a vendor signature AND a content
+ * signature so that a hypothetical future Peloton ProCount production report
+ * (different module, different layout) wouldn't be eaten by this filter.
+ *
+ * First seen 2026-05-04 — Hollywood Unit 1SH.pdf forwarded by adavis@frioenergypartners.com.
+ */
+const pelotonWellViewDailyDrilling: NonProductionFilter = {
+  name: 'peloton-wellview-daily-drilling',
+  category: 'drilling report (Peloton WellView)',
+  fileKinds: ['pdf'],
+  detect(ctx: ParserContext): string | null {
+    const text = ctx.pdfText;
+    if (!text) return null;
+    // Vendor signature: Peloton appears on every page header.
+    const hasVendor = /\bpeloton\b/i.test(text) || /www\.peloton\.com/i.test(text);
+    if (!hasVendor) return null;
+    // Content signature: one of these strings is unique to drilling-report layouts.
+    const hasDrillingHeader = /\bDaily Drilling\b/i.test(text);
+    const hasMudChecks = /\bMud Checks\b/i.test(text);
+    if (!hasDrillingHeader && !hasMudChecks) return null;
+
+    const which = hasDrillingHeader && hasMudChecks
+      ? '"Daily Drilling" + "Mud Checks"'
+      : hasDrillingHeader
+        ? '"Daily Drilling"'
+        : '"Mud Checks"';
+    return (
+      `Peloton WellView Daily Drilling report (PDF text contains "Peloton" + ${which}). ` +
+      'These cover rig operations, AFE costs, mud weights, and drilling parameters — ' +
+      'no production volumes. Ignored cleanly so the flagged-review queue stays focused ' +
+      'on genuine new operator formats.'
+    );
+  },
+};
+
+
+/**
  * Inline image attachments (PNG / JPG / GIF / etc.)
  * -------------------------------------------------
  * Emails forwarded from Outlook (and Apple Mail, Gmail's own composer, etc.)
@@ -367,5 +429,6 @@ export const NON_PRODUCTION_FILTERS: readonly NonProductionFilter[] = [
   combocurveTemplateSample,
   ourOwnTestExport,
   combocurveWellCatalog,
+  pelotonWellViewDailyDrilling,
   inlineImageAttachment,
 ] as const;
