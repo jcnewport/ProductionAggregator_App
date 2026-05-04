@@ -33,6 +33,7 @@ import { pdsXtoDailyAdapter } from './pdsXtoDaily.js';
 import { pdsMewbourneDailyAdapter } from './pdsMewbourneDaily.js';
 import { pdsMewbourneMonthlyAdapter } from './pdsMewbourneMonthly.js';
 import { frioDailyProductionXlsxAdapter } from './frioDailyProductionXlsx.js';
+import { frioMonthlyProductionXlsxAdapter } from './frioMonthlyProductionXlsx.js';
 import { pdsMatadorMonthlyAdapter } from './pdsMatadorMonthly.js';
 import { pdsDiamondbackMonthlyAdapter } from './pdsDiamondbackMonthly.js';
 import { pdsDiversifiedMonthlyAdapter } from './pdsDiversifiedMonthly.js';
@@ -776,6 +777,37 @@ export const FORMAT_REGISTRY: readonly RegisteredFormat[] = [
     status: 'implemented',
     notes:
       'Single sheet "Daily Production Report". 6 columns. No API (well_name_aliases required). Gas Flare + Fieldname in extraFields. Excel-serial dates converted via XLSX.SSF.parse_date_code. Single-day report (all rows share a Production Date).',
+  },
+
+  // ─── Format 12 — Frio Monthly Production XLSX ("Monthly Production for Sendout") ───
+  //
+  // Monthly twin of Format 11 (Frio Daily Production XLSX). Same Frio /
+  // WEnergy / Joyn Analytics platform, same forwarder (adavis@frioenergypartners.com),
+  // same field-centric layout — but emits a single monthly snapshot instead
+  // of a daily one. First seen 2026-05-04 ("Frio Monthly Production
+  // (Monthly Production for Sendout) a/o 2026-05-04").
+  //
+  // Sheet: "Monthly Production for Sendout".
+  // 5 columns: Production Month | Wellname | Oil Production | Gas Production |
+  // Water Production. NO Gas Flare column (vs Daily's 6).
+  //
+  // Quirks encoded:
+  //   - No API column. api10/api14 empty; well_name_aliases resolves wells
+  //     (same pattern as Frio Daily, BTA Daily XLSX, Hierarchical Monthly Report).
+  //   - No Sales / no pressures / no choke / no downtime — all null.
+  //   - Fieldname (row 2) preserved in extraFields.fieldname.
+  //   - Production Month is normalized to first-of-month for storage stability.
+  //
+  // Detect is tight AND mutually exclusive vs Format 11: requires the
+  // "Monthly Production for Sendout" sheet name AND the row-0 title AND a
+  // header row containing both "Wellname" and "Production Month" AND
+  // explicitly excluding "Gas Flare" (the Daily-sibling tell).
+  {
+    adapter: frioMonthlyProductionXlsxAdapter,
+    sampleFile: 'Frio_Monthly_Production.xlsx',
+    status: 'implemented',
+    notes:
+      'Single sheet "Monthly Production for Sendout". 5 columns (NO Gas Flare). No API (well_name_aliases required). Fieldname in extraFields. Date normalized to first-of-month. Single-month report. Mutually exclusive vs Frio Daily by both sheet name and Gas-Flare absence.',
   },
 ];
 
