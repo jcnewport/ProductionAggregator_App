@@ -26,6 +26,7 @@ import {
 import { supabase } from './supabase.js';
 import { dispatchParser, ParserOutcome } from '../parsers/index.js';
 import { storeMonthlyRecords, storeDailyRecords } from './productionStorage.js';
+import { recordIgnoredAttachment } from './nonProductionFilesStore.js';
 import { computeRetryState, DEFAULT_MAX_RETRIES } from './errorClassification.js';
 import { maybeSendFailureAlert } from './notifications.js';
 
@@ -314,9 +315,9 @@ export async function processMessage(
         const outcome: ParserOutcome = await dispatchParser(attachment, message.sender);
 
         if (outcome.kind === 'ignored') {
-          // Known-non-production file (tracking sheet, template, etc.) —
-          // this is a clean success, not an error. Note it for the log,
-          // but don't push to errors[] and don't count as "processed".
+          // Known-non-production file (tracking sheet, template, drilling
+          // report, etc.) — clean success, not an error. Note it for the
+          // log, but don't push to errors[] and don't count as "processed".
           attachmentsIgnored++;
           ignoredNotes.push(
             `[${attachment.filename}] Ignored as ${outcome.category} (${outcome.filterName}): ${outcome.reason}`
@@ -324,6 +325,29 @@ export async function processMessage(
           console.log(
             `[emailPoller] Ignored attachment ${attachment.filename}: ${outcome.category} (${outcome.filterName})`
           );
+          // Audit: record real non-production attachments (drilling reports,
+          // templates, tracking sheets, …) so the dashboard can list them.
+          // Inline-image filter hits are skipped inside recordIgnoredAttachment
+          // by name. Failures here are intentionally non-fatal — the email
+          // status doesn't depend on this audit log existing.
+          await recordIgnoredAttachment({
+            tenantId,
+            emailLogId,
+            sender: message.sender,
+            subject: message.subject,
+            emailReceivedAt: message.receivedAt ? message.receivedAt.toISOString() : null,
+            filename: attachment.filename,
+            mimeType: attachment.mimeType ?? null,
+            fileBytes: attachment.data?.length ?? null,
+            sourceStoragePath: storagePath,
+            category: outcome.category,
+            filterName: outcome.filterName,
+            reason: outcome.reason,
+          }).catch((err) => {
+            console.warn(
+              `[emailPoller] recordIgnoredAttachment threw (non-fatal): ${err}`
+            );
+          });
           continue;
         }
 

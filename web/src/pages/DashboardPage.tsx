@@ -74,6 +74,22 @@ interface FlaggedRow {
   created_at: string;
 }
 
+interface NonProductionFileRow {
+  id: string;
+  filename: string;
+  mime_type: string | null;
+  file_bytes: number | null;
+  category: string;
+  filter_name: string;
+  reason: string | null;
+  sender: string | null;
+  subject: string | null;
+  email_received_at: string | null;
+  storage_bucket: string;
+  storage_path: string;
+  created_at: string;
+}
+
 /** How often the dashboard silently re-fetches to keep the Recent Activity
  * table warm. 15 min keeps the view fresh without hammering Supabase or
  * burning quota — operators only send a couple of emails a day, so a faster
@@ -85,6 +101,7 @@ export default function DashboardPage() {
   const [recent, setRecent] = useState<EmailLogRow[]>([]);
   const [flagged, setFlagged] = useState<EmailLogRow[]>([]);
   const [flaggedRows, setFlaggedRows] = useState<FlaggedRow[]>([]);
+  const [nonProdFiles, setNonProdFiles] = useState<NonProductionFileRow[]>([]);
   const [stats, setStats] = useState<Stats>({
     monthlyRows: null,
     dailyRows: null,
@@ -124,6 +141,7 @@ export default function DashboardPage() {
           dailyCountRes,
           flaggedRowsRes,
           flaggedRowCountRes,
+          nonProdFilesRes,
         ] = await Promise.all([
           supabase
             .from('email_log')
@@ -151,6 +169,19 @@ export default function DashboardPage() {
             .order('created_at', { ascending: false })
             .limit(15),
           supabase.from('flagged_records').select('*', { count: 'exact', head: true }),
+          // Non-production attachments — drilling reports, tracking
+          // sheets, templates that the filter chain classified as
+          // 'ignored'. Read directly via Supabase (RLS scopes by tenant).
+          supabase
+            .from('non_production_files')
+            .select(
+              'id, filename, mime_type, file_bytes, category, filter_name, ' +
+                'reason, sender, subject, email_received_at, storage_bucket, ' +
+                'storage_path, created_at'
+            )
+            .order('email_received_at', { ascending: false, nullsFirst: false })
+            .order('created_at', { ascending: false })
+            .limit(50),
         ]);
 
         if (cancelled) return;
@@ -161,10 +192,17 @@ export default function DashboardPage() {
         if (dailyCountRes.error) throw new Error(`daily count: ${dailyCountRes.error.message}`);
         if (flaggedRowsRes.error) throw new Error(`flagged_records: ${flaggedRowsRes.error.message}`);
         if (flaggedRowCountRes.error) throw new Error(`flagged_records count: ${flaggedRowCountRes.error.message}`);
+        // Non-production files — soft error: don't kill the whole load if
+        // this one query fails (e.g. table not yet migrated on a stale env).
+        // Just log + show empty.
+        if (nonProdFilesRes.error) {
+          console.warn('non_production_files load failed:', nonProdFilesRes.error.message);
+        }
 
         setRecent((recentRes.data ?? []) as EmailLogRow[]);
         setFlagged((flaggedRes.data ?? []) as EmailLogRow[]);
         setFlaggedRows((flaggedRowsRes.data ?? []) as FlaggedRow[]);
+        setNonProdFiles((nonProdFilesRes.data ?? []) as unknown as NonProductionFileRow[]);
         setStats({
           monthlyRows: monthlyCountRes.count ?? 0,
           dailyRows: dailyCountRes.count ?? 0,
@@ -372,6 +410,33 @@ export default function DashboardPage() {
           <SkeletonRow />
         ) : (
           <EmailLogTable rows={recent} showErrors={false} onRetrySuccess={reloadFromDb} />
+        )}
+      </Card>
+
+      {/* Non-production files — bottom of dashboard.
+          Drilling reports, well-tracking spreadsheets, templates: things
+          that aren't production data but rode along in the inbox. The
+          filter chain quietly classifies them as 'ignored' and the email
+          poller logs them here so Caleb retains an audit trail (and can
+          open the PDF/HTML inline via signed URL). Inline-image attachments
+          are deliberately excluded. */}
+      <Card
+        title="Non-Production Files"
+        subtitle={
+          nonProdFiles.length === 0
+            ? 'No non-production attachments recorded yet. (Drilling reports, tracking sheets, templates land here.)'
+            : `${nonProdFiles.length} attachment${nonProdFiles.length === 1 ? '' : 's'} classified as non-production. Most recent first.`
+        }
+      >
+        {loading ? (
+          <SkeletonRow />
+        ) : nonProdFiles.length === 0 ? (
+          <EmptyState
+            message="Nothing here yet."
+            detail="When Aaron (or anyone) forwards a drilling report or tracking sheet, it'll show up here."
+          />
+        ) : (
+          <NonProductionFilesTable rows={nonProdFiles} />
         )}
       </Card>
     </div>
@@ -977,6 +1042,147 @@ function FlaggedRowsTable({ rows }: { rows: FlaggedRow[] }) {
     </div>
   );
 }
+
+/* ──────────────────────────────────────────────────────────────
+ * Non-Production Files — bottom-section table.
+ *
+ * Renders one row per attachment with: file name (clickable → opens
+ * via signed URL), email subject, sender, date, category badge,
+ * and View link. Click "View" → fetches a 5-minute signed URL from
+ * /api/non-production-files/:id/url and opens the PDF in a new tab.
+ * ────────────────────────────────────────────────────────────── */
+function NonProductionFilesTable({ rows }: { rows: NonProductionFileRow[] }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={tableStyle}>
+        <thead>
+          <tr>
+            <th style={thStyle}>Received</th>
+            <th style={thStyle}>File</th>
+            <th style={thStyle}>Email Subject</th>
+            <th style={thStyle}>Sender</th>
+            <th style={thStyle}>Category</th>
+            <th style={thStyle}>View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className="sis-row">
+              <td style={tdStyle}>{formatDateTime(r.email_received_at ?? r.created_at)}</td>
+              <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '12px' }}>
+                {truncate(r.filename, 48)}
+              </td>
+              <td style={{ ...tdStyle, maxWidth: '320px' }}>
+                {truncate(r.subject ?? '—', 60)}
+              </td>
+              <td style={{ ...tdStyle, color: colors.textMuted, fontSize: '12px' }}>
+                {truncate(r.sender ?? '—', 36)}
+              </td>
+              <td style={tdStyle}>
+                <span
+                  style={{
+                    backgroundColor: `${colors.info}22`,
+                    color: '#1d6a89',
+                    padding: '2px 8px',
+                    borderRadius: radii.pill,
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    display: 'inline-block',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={r.reason ?? r.filter_name}
+                >
+                  {r.category}
+                </span>
+              </td>
+              <td style={tdStyle}>
+                <ViewNonProdFileButton id={r.id} mimeType={r.mime_type} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** "View" link that fetches a short-lived signed URL on click and opens
+ *  it in a new tab. We don't pre-fetch URLs at table render time because
+ *  signed URLs are short-lived (5 min) and most rows never get clicked. */
+function ViewNonProdFileButton({
+  id,
+  mimeType,
+}: {
+  id: string;
+  mimeType: string | null;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleClick() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const resp = await fetch(`/api/non-production-files/${id}/url`, {
+        headers: await authHeaders(),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${resp.status}`);
+      }
+      const body = (await resp.json()) as { ok: boolean; url?: string; error?: string };
+      if (!body.ok || !body.url) throw new Error(body.error || 'No URL returned');
+      window.open(body.url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const label = mimeType?.includes('pdf')
+    ? busy
+      ? 'Loading…'
+      : 'View PDF'
+    : busy
+      ? 'Loading…'
+      : 'View';
+
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px' }}>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        style={{
+          padding: '4px 10px',
+          borderRadius: radii.md,
+          border: `1px solid ${colors.borderCard}`,
+          backgroundColor: 'white',
+          color: colors.midnightNavy,
+          fontSize: '12px',
+          fontWeight: 500,
+          cursor: busy ? 'wait' : 'pointer',
+          transition: transitions.snappy,
+        }}
+      >
+        {label}
+      </button>
+      {err && (
+        <span style={{ color: colors.danger, fontSize: '11px' }}>{err}</span>
+      )}
+    </span>
+  );
+}
+
+/** Pull the Supabase auth header for fetch() calls to /api/* — same
+ *  pattern as the existing reprocess-email button. */
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, { bg: string; fg: string; dot: string }> = {

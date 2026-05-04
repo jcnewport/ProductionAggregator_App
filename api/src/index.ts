@@ -22,6 +22,7 @@ import exportHistoryRouter from './routes/exportHistory.js';
 import adminRouter from './routes/admin.js';
 import mappingsRouter from './routes/mappings.js';
 import flaggedRecordsRouter from './routes/flaggedRecords.js';
+import nonProductionFilesRouter from './routes/nonProductionFiles.js';
 import onboardingRouter from './routes/onboarding.js';
 import {
   adminLimiter,
@@ -213,6 +214,19 @@ app.use(
   requireAuthMaybe(),
   requireTenantMaybe(),
   flaggedRecordsRouter
+);
+
+// Non-production files — drilling reports, tracking sheets, templates that
+// the dispatcher classified as 'ignored'. Read-only audit log + signed-URL
+// view. Tenant users see only their own tenant's rows (RLS), super-admin
+// sees all.
+//   GET /api/non-production-files?limit=N
+//   GET /api/non-production-files/:id/url
+app.use(
+  '/api/non-production-files',
+  requireAuthMaybe(),
+  requireTenantMaybe(),
+  nonProductionFilesRouter
 );
 
 // TODO: Mount additional route handlers
