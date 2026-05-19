@@ -146,19 +146,19 @@ export default function MonthlyProductionChart({ monthsBack = 24 }: Props) {
         <ChartPanel
           title="Oil"
           unit="BBL"
-          color={colors.midnightNavy}
+          color={colors.electricTeal}
           values={rows.map((r) => ({ month: r.month, value: r.oil_total }))}
         />
         <ChartPanel
           title="Gas"
           unit="MCF"
-          color="#4A6FA5" /* steel blue from brand brief — kept literal because not in theme */
+          color="#C44536" /* brick red — chosen over theme `danger` so error states stay distinct */
           values={rows.map((r) => ({ month: r.month, value: r.gas_total }))}
         />
         <ChartPanel
           title="Water"
           unit="BBL"
-          color={colors.electricTeal}
+          color="#4A6FA5" /* steel blue — kept literal because not in theme */
           values={rows.map((r) => ({ month: r.month, value: r.water_total }))}
         />
       </div>
