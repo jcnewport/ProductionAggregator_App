@@ -5,31 +5,36 @@ How tenant isolation actually works at the database level. If you change anythin
 ## The two functions every policy depends on
 
 ```sql
--- Returns the calling user's tenant_id, from their JWT claims.
+-- Returns the calling user's tenant_id by looking it up from user_tenants.
+-- Uses auth.uid() which Supabase populates from every authenticated JWT.
 CREATE OR REPLACE FUNCTION public.current_tenant_id()
 RETURNS uuid
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public', 'auth'
 AS $$
-  SELECT NULLIF(
-    current_setting('request.jwt.claims', true)::jsonb ->> 'tenant_id',
-    ''
-  )::uuid;
+  SELECT tenant_id FROM public.user_tenants WHERE user_id = auth.uid();
 $$;
 
--- Returns TRUE if the calling user has the super-admin flag on any tenant row.
+-- Returns TRUE if the calling user has the super-admin flag in user_tenants.
 CREATE OR REPLACE FUNCTION public.is_super_admin()
 RETURNS boolean
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public', 'auth'
 AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM user_tenants
-    WHERE user_id = auth.uid()
-      AND is_super_admin = true
+  SELECT COALESCE(
+    (SELECT is_super_admin FROM public.user_tenants WHERE user_id = auth.uid()),
+    false
   );
 $$;
 ```
 
-Both are `STABLE` (Postgres can cache within a single query) but **not** `SECURITY DEFINER` — they run as the calling user, so a malicious user can't trick them into returning someone else's tenant.
+**SECURITY DEFINER** here is important and intentional:
+- The functions need to SELECT from `user_tenants`, which itself has RLS that limits a user to their own rows
+- Without DEFINER, calling `current_tenant_id()` would invoke RLS on `user_tenants`, which is a circular dependency in some paths
+- DEFINER means the function runs as the owner (`postgres` role), bypassing RLS just for this lookup
+- The function still only returns the calling user's own tenant_id because the WHERE clause uses `auth.uid()` (which is always the calling user, even under DEFINER)
+
+`auth.uid()` is Supabase's built-in helper that extracts the `sub` claim from the JWT — every authenticated user has one. **No custom access-token hook is required.** This is the key simplification: we don't have to register a JWT-claims-injecting function in the Supabase Auth dashboard.
 
 ## The standard policy pattern
 
@@ -70,22 +75,22 @@ WITH CHECK (is_super_admin() OR tenant_id = current_tenant_id());
 | `combocurve_wells` | combocurve_wells authenticated read | SELECT | Authenticated |
 | `combocurve_wells` | combocurve_wells service write | ALL | service_role |
 
-## How `tenant_id` reaches `current_tenant_id()`
+## How a user's tenant_id is determined
 
 ```
 1. User authenticates via Supabase Auth (email/password or magic link).
-2. Supabase issues a JWT with claims:
-     - sub: <user_id>
+2. Supabase issues a JWT with the standard claims:
+     - sub: <user_id>   ← this is auth.uid()
      - email: <user_email>
-     - tenant_id: <tenant_uuid>      ← THIS is the critical claim
-3. The `tenant_id` claim is set by an auth-hook function (see migration 0001_multitenancy_phase1.sql)
-   that reads user_tenants when the user logs in.
-4. Frontend sends the JWT on every PostgREST call (supabase-js handles this automatically).
-5. Postgres has access to the JWT via `current_setting('request.jwt.claims', true)`.
-6. `current_tenant_id()` extracts the claim. Done.
+   No tenant_id claim is needed. No custom hook required.
+3. Frontend sends the JWT on every PostgREST call (supabase-js handles this automatically).
+4. Postgres exposes auth.uid() to RLS policies via the JWT's sub claim.
+5. RLS calls current_tenant_id(), which does:
+     SELECT tenant_id FROM user_tenants WHERE user_id = auth.uid()
+6. The lookup returns the user's tenant. RLS uses it to filter rows.
 ```
 
-Backend express middleware does the same thing in `api/src/middleware/security.ts` for routes that aren't PostgREST: parse the Bearer token, resolve `tenant_id`, attach to `req.user`.
+The frontend ALSO decodes the user_id from the JWT to determine super-admin status for UI gating (see `frontend/02-auth-and-tenants.md`), but that's a UI convenience — the security enforcement is in RLS, not in the frontend.
 
 ## Why "ALL" instead of separate SELECT/INSERT/UPDATE/DELETE policies?
 
@@ -95,27 +100,26 @@ Because the predicate is the same for every operation. Having one policy named `
 
 When acting as a super-admin in the app and you want to *see* what a regular tenant user would see for tenant X, **don't temporarily flip your `is_super_admin` flag**. Instead, set up a sandbox tenant + sandbox user and log in as that user in a separate browser session. Flipping flags is the easiest way to lock yourself out.
 
-## What happens if `tenant_id` is NULL in the JWT?
+## What happens if a user has no `user_tenants` row?
 
 `current_tenant_id()` returns NULL. Every `tenant_id = current_tenant_id()` predicate then evaluates to NULL (because `anything = NULL` is NULL, not TRUE). NULL is not TRUE, so RLS denies the row.
 
-In practice this means: **a user with no tenant assignment sees nothing**. They can log in, but every page is empty until super-admin assigns them to a tenant.
+In practice this means: **a user who exists in `auth.users` but is missing from `user_tenants` sees nothing**. They can log in, but every page is empty until super-admin assigns them to a tenant via the Admin UI.
 
 ## What `service_role` is and why we have a policy for it
 
 Supabase issues a `service_role` JWT alongside the `anon` key. The service role bypasses RLS entirely — it's intended for trusted server-side code (our Railway API).
 
-The `non_production_files` table has an explicit `service_role` policy because the email poller (which runs as service_role) needs to INSERT rows. The Postgres RLS check still runs for service_role, so we make the policy permissive for that role.
-
-For most data tables, we don't need a separate service_role policy: when the poller inserts a production row, it explicitly passes the tenant_id from the resolved tenant, and the standard `tenant_isolation` policy accepts it because the service_role bypasses RLS in practice. But the explicit policy on `non_production_files` is belt-and-suspenders.
+The `non_production_files` table has an explicit `service_role` policy because the email poller (which runs as service_role) needs to INSERT rows. For most data tables, we don't need a separate service_role policy: when the poller inserts a production row, it explicitly passes the tenant_id from the resolved tenant.
 
 ## The "I just deployed and now every query returns nothing" failure mode
 
 Symptom: a new feature ships, queries that should return rows return zero rows.
 
-Most likely cause: missing `tenant_id` in the INSERT path. If you write a row without a `tenant_id`, it's still inserted (the column is NOT NULL — INSERT will actually error), but if a migration ever loosened the constraint, the row would exist but RLS would hide it.
-
-Always check: `SELECT * FROM <table> WHERE tenant_id IS NULL;` as super-admin. If anything comes back, that's a bug.
+Possible causes:
+1. **Missing `tenant_id` in the INSERT path.** Always include `tenant_id` explicitly in write payloads — RLS's `WITH CHECK` rejects writes where the column is NULL.
+2. **The user is not in `user_tenants`.** Verify with `SELECT * FROM user_tenants WHERE user_id = '<user_uuid>';` as super-admin.
+3. **The user IS in `user_tenants` but `current_tenant_id()` returns the wrong value.** This can happen if a single user has multiple `user_tenants` rows — the query has no `LIMIT 1`, so it'll error or return a random row. Check: `SELECT COUNT(*) FROM user_tenants WHERE user_id = '<user_uuid>';` — should be 1.
 
 ## Adding RLS to a NEW table
 

@@ -56,15 +56,39 @@ COMMENT ON COLUMN public.tenants.is_active   IS 'Kill switch. When false, the te
 -- ---------------------------------------------------------------------------
 -- 2. Seed the first tenant: Frio Energy Holdings
 -- ---------------------------------------------------------------------------
-INSERT INTO public.tenants (slug, name, email_alias, is_active, notes)
-VALUES (
-  'frio',
-  'Frio Energy Holdings',
-  's.is_ad_prod@stewardship.is',
-  true,
-  'Initial tenant; all data ingested before 2026-04-22 belongs here. Keeps the original ingestion alias for backwards compatibility.'
-)
-ON CONFLICT (slug) DO NOTHING;
+-- Historically this migration seeded a "Frio Energy Holdings" tenant
+-- so the live system had something to attach the multi-tenancy backfill
+-- to. That seed is preserved (default) for re-applies against the
+-- original Stewardship.IS deployment.
+--
+-- FOR A FRESH INSTALL FOR A DIFFERENT CUSTOMER:
+--   Set the Postgres setting `pa.bootstrap_frio` to 'false' BEFORE
+--   running this migration:
+--     SET pa.bootstrap_frio = 'false';
+--     \i 0001_multitenancy_phase1.sql
+--   Then use api/scripts/bootstrap-first-tenant.ts to create your
+--   real first tenant.
+--
+-- The backfill in step 4 below grabs whatever tenant exists; if no
+-- tenant exists at that point (because you skipped the Frio seed AND
+-- haven't bootstrapped your own yet), the migration still runs but
+-- the backfill is a no-op (no rows to backfill on a fresh install).
+DO $$
+BEGIN
+  IF COALESCE(current_setting('pa.bootstrap_frio', true), 'true') <> 'false' THEN
+    INSERT INTO public.tenants (slug, name, email_alias, is_active, notes)
+    VALUES (
+      'frio',
+      'Frio Energy Holdings',
+      's.is_ad_prod@stewardship.is',
+      true,
+      'Initial tenant; all data ingested before 2026-04-22 belongs here. Keeps the original ingestion alias for backwards compatibility.'
+    )
+    ON CONFLICT (slug) DO NOTHING;
+  ELSE
+    RAISE NOTICE 'Skipping Frio tenant seed (pa.bootstrap_frio is false).';
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. Add tenant_id columns (nullable at first so we can backfill)

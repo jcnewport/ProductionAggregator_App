@@ -28,6 +28,7 @@ A tenant user logs in, picks a date range, and downloads a single Excel that mat
 - **Adding a new operator?** [docs/backend/05-adding-a-new-parser.md](docs/backend/05-adding-a-new-parser.md).
 - **Understanding the database?** [docs/database/01-schema.md](docs/database/01-schema.md) and [docs/database/02-rls-and-tenancy.md](docs/database/02-rls-and-tenancy.md).
 - **Onboarding a new client?** [docs/operations/04-onboarding-new-client.md](docs/operations/04-onboarding-new-client.md) and [`ONBOARDING_NEW_CLIENT.md`](ONBOARDING_NEW_CLIENT.md).
+- **Standing up a fresh copy from scratch?** [docs/operations/00-fresh-install.md](docs/operations/00-fresh-install.md) — full cold-start playbook.
 
 The documentation is structured so a competent developer can pick up this codebase **using only what is in this repo**, without access to the original author. If you find a gap, please add to the docs and PR it.
 

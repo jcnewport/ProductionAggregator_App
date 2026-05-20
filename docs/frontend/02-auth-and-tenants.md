@@ -13,30 +13,28 @@ How users sign in, how their tenant is determined, and how the frontend enforces
 5. Every Supabase query the page makes is auto-scoped by RLS to the user's tenant.
 ```
 
-## The JWT carries the tenant_id
+## The JWT carries auth.uid(), not tenant_id
 
-When a user signs in via Supabase Auth, the JWT issued includes a custom claim:
+When a user signs in via Supabase Auth, the JWT issued includes the standard claims:
 
 ```json
 {
   "sub": "<user_uuid>",
   "email": "user@frio.example",
-  "tenant_id": "<tenant_uuid>"
+  "role": "authenticated"
 }
 ```
 
-The `tenant_id` claim is injected by an auth-hook function that reads `user_tenants` at sign-in. Source: `api/migrations/0001_multitenancy_phase1.sql`.
-
-If a user has multiple `user_tenants` rows (rare; theoretical multi-tenant case), the hook picks one deterministically (usually the most recently created, or `is_super_admin` first if any are flagged). The frontend currently does NOT offer a tenant switcher — see "Open question" at end of file.
+**No `tenant_id` claim. No custom access-token hook.** This was a deliberate simplification: registering a JWT hook requires a Supabase Auth dashboard step that's hard to codify in a migration. Instead, the Postgres helper `current_tenant_id()` runs as `SECURITY DEFINER` and looks up the user's tenant from `user_tenants` at query time, keyed on `auth.uid()` (which IS in every JWT).
 
 ## How RLS uses it
 
-The JWT claims are available to Postgres via `current_setting('request.jwt.claims', true)`. Two helper functions:
-
 ```sql
-public.current_tenant_id() → uuid          -- the JWT's tenant_id claim
-public.is_super_admin()    → boolean       -- TRUE if user has the flag on any tenant row
+public.current_tenant_id() → uuid          -- looks up user_tenants by auth.uid()
+public.is_super_admin()    → boolean       -- TRUE if user has the flag in user_tenants
 ```
+
+Both functions are `SECURITY DEFINER` so they can read `user_tenants` without triggering RLS recursion. See [database/02-rls-and-tenancy.md](../database/02-rls-and-tenancy.md) for the full mechanics.
 
 Every data table has the policy:
 
@@ -109,7 +107,7 @@ Source: `api/src/routes/onboarding.ts`.
 
 ## Open question: tenant switcher
 
-There is currently no UI for a user to switch between tenants. If `user_tenants` has multiple rows for the same user, the auth hook picks one and that's what they see. We don't surface the others.
+There is currently no UI for a user to switch between tenants. If `user_tenants` has multiple rows for the same user, `current_tenant_id()` returns whichever row Postgres picks first (no `ORDER BY`, no `LIMIT`), which is undefined behavior. In practice every user today has exactly one `user_tenants` row, so this never triggers. If we ever support multi-tenant users, we'd need to either add an `ORDER BY is_super_admin DESC, created_at ASC LIMIT 1` to the function OR introduce a tenant-switcher UI.
 
 This is fine for now because:
 - Super-admin is the only user who'd realistically need multiple-tenant access, and super-admin's RLS predicate is `is_super_admin() OR …`, so they see everything anyway.
@@ -133,7 +131,7 @@ If a frontend bug seems to be RLS-related, log into the Supabase dashboard, run 
 
 1. Check Supabase Auth dashboard: does the user exist? Is the email confirmed?
 2. Check `user_tenants`: is there a row linking this user to a tenant?
-3. Check the JWT: log in as the user, copy the access token, paste it into jwt.io. Does it have a `tenant_id` claim? If not, the auth hook didn't fire.
-4. If the auth hook didn't fire: it's likely a Supabase-side issue. The auth hook is set as a "custom access token hook" in the Supabase project's Auth settings → Hooks. Verify it's enabled and pointed at the right function.
+3. Check the JWT: log in as the user, copy the access token, paste it into jwt.io. The `sub` claim should be the user's UUID.
+4. Run as super-admin: `SELECT * FROM user_tenants WHERE user_id = '<sub claim>';`. If zero rows, the user has no tenant — assign one via the Admin UI.
 
 See [runbooks](../runbooks/) for fuller troubleshooting.

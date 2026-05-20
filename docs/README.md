@@ -55,6 +55,7 @@ Read in this order if you are new to the project. Skim section 1, then jump to w
 - [03-components.md](frontend/03-components.md) — shared components, design tokens, the chart
 
 ### Operations
+- [00-fresh-install.md](operations/00-fresh-install.md) — **standing up a new copy from scratch** (cold-start playbook)
 - [01-deployment.md](operations/01-deployment.md) — Railway and Supabase deploy flow
 - [02-secrets-and-env.md](operations/02-secrets-and-env.md) — every environment variable, where it lives, how to rotate it
 - [03-monitoring.md](operations/03-monitoring.md) — logs, health checks, alerts
